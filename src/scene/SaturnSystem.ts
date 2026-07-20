@@ -5,9 +5,12 @@
  */
 
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, Group, IcosahedronGeometry,
-  Line, LineBasicMaterial, Mesh, Object3D, RingGeometry, SphereGeometry, Vector3,
+  AdditiveBlending, BufferAttribute, BufferGeometry, CylinderGeometry, Group,
+  IcosahedronGeometry, Line, LineBasicMaterial, Mesh, Object3D, RingGeometry,
+  SphereGeometry, Vector3,
 } from 'three';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { vec3 as tslVec3 } from 'three/tsl';
 import { uniform } from 'three/tsl';
 import type { UniformNode } from 'three/webgpu';
 import type { BodyDefinition } from '../orbital/types.ts';
@@ -21,7 +24,11 @@ import { createMoonMaterial } from '../materials/moonMaterials.ts';
 import { createAtmosphereShell } from '../materials/atmospheres.ts';
 import { createRaymarchedAtmosphere } from '../materials/raymarchAtmosphere.ts';
 import { createEnceladusPlumes } from '../effects/plumes.ts';
-import { cloudPhaseUniform, moonShadowUniforms, spokePhaseUniform } from '../materials/sharedUniforms.ts';
+import {
+  cloudPhaseUniform, edgeOnUniform, moonShadowUniforms, spokePhaseUniform,
+} from '../materials/sharedUniforms.ts';
+import { createFRing } from '../materials/fRing.ts';
+import { createRingSlab } from '../effects/ringSlab.ts';
 import { saturnShadowOnMoon } from '../physics/eclipse.ts';
 import { Ringshine } from '../physics/ringshine.ts';
 import { fbm3D } from '../utils/noise.ts';
@@ -138,6 +145,29 @@ export class SaturnSystem {
       createRingsMaterial(this.ringProfile, maps?.ringScatter),
     );
     saturnAnchor.add(rings);
+
+    // F ring: kinked clumpy strands, strongly forward-scattering.
+    for (const strand of createFRing()) saturnAnchor.add(strand);
+
+    // Volumetric fly-through slab (fades in near the ring plane).
+    saturnAnchor.add(createRingSlab(this.ringProfile.texture));
+
+    // Edge-on rim: from grazing angles the infinitely thin plane vanishes;
+    // this faint ribbon at the A-ring outer edge keeps a bright line alive.
+    {
+      const rimMat = new MeshBasicNodeMaterial();
+      rimMat.transparent = true;
+      rimMat.blending = AdditiveBlending;
+      rimMat.depthWrite = false;
+      rimMat.side = 2; // DoubleSide
+      rimMat.colorNode = tslVec3(0.85, 0.80, 0.68);
+      rimMat.opacityNode = edgeOnUniform;
+      const rim = new Mesh(
+        new CylinderGeometry(toUnits(136780), toUnits(136780), 0.05, 256, 1, true),
+        rimMat,
+      );
+      saturnAnchor.add(rim);
+    }
 
     // --- Moons ---
     for (const def of MOONS) {

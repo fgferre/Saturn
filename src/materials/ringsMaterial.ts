@@ -14,9 +14,9 @@ import {
 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  abs, add, atan2, cameraPosition, clamp, cos, dot, float, length, max, mix,
-  mul, mx_fractal_noise_float, normalize, oneMinus, positionWorld, pow, sin,
-  smoothstep, texture, uv, vec2, vec3,
+  abs, add, atan2, cameraPosition, clamp, cos, dot, float, fwidth, length,
+  max, mix, mul, mx_fractal_noise_float, normalize, oneMinus, positionWorld,
+  pow, sin, smoothstep, texture, uv, vec2, vec3,
 } from 'three/tsl';
 import { spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
 import { moonTransitLight } from './moonTransits.ts';
@@ -100,7 +100,8 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   // --- B-ring spokes: ghostly radial streaks of levitated dust that corotate
   // with the magnetosphere. Dark in backscattered light, bright when backlit.
   // Seasonal in reality (near-equinox phenomenon — which the mid-2020s are).
-  const ang = atan2(P.z, P.x).add(spokePhaseUniform);
+  const rawAng = atan2(P.z, P.x);
+  const ang = rawAng.add(spokePhaseUniform);
   const rr = uv().x;
   const bMask = smoothstep(0.34, 0.42, rr).mul(smoothstep(0.70, 0.60, rr));
   const spokeNoise = mx_fractal_noise_float(
@@ -110,10 +111,37 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   face = face.mul(oneMinus(spoke.mul(sameSide)));
   fwd = add(fwd, spoke.mul(0.5).mul(alpha));
 
+  // --- Self-gravity wakes: elongated clumps pitched ~22° from the orbital
+  // tangent make ring brightness depend on viewing azimuth (the real
+  // quadrant asymmetry seen in A-ring photos). Strongest in the A ring.
+  const PITCH = 22 * Math.PI / 180;
+  const wakeAng = rawAng.add(Math.PI / 2 + PITCH); // wake long-axis azimuth
+  const wakeDir = vec3(cos(wakeAng), 0.0, sin(wakeAng));
+  const vH = normalize(vec3(V.x, 0.0, V.z));
+  const alongWake = dot(vH, wakeDir);
+  // Quadrupole modulation: dimmer looking along the wakes, brighter across.
+  const wakeMaskA = smoothstep(0.74, 0.78, rr).mul(smoothstep(0.96, 0.90, rr));
+  const wakeMaskB = smoothstep(0.34, 0.40, rr).mul(smoothstep(0.70, 0.62, rr)).mul(0.35);
+  const wakeAmp = wakeMaskA.add(wakeMaskB).mul(0.15);
+  const wakes = oneMinus(alongWake.mul(alongWake).mul(2).sub(1).mul(wakeAmp));
+  face = face.mul(wakes);
+
+  // --- Azimuthal granularity: fine clumpiness along the rings, faded out
+  // before it can alias at distance (fwidth-based).
+  const grainCoord = vec3(cos(rawAng).mul(60), sin(rawAng).mul(60), rr.mul(30));
+  const grain = mx_fractal_noise_float(grainCoord, 2, 2.0, 0.5).mul(0.5).add(0.5);
+  const grainFade = clamp(oneMinus(fwidth(rawAng).mul(30)), 0.0, 1.0);
+  face = face.mul(grain.sub(0.5).mul(0.09).mul(grainFade).add(1.0));
+
   const color = face.mul(add(1.0, surge)).add(scatterColor.mul(fwd)).mul(shadow)
     .add(albedo.mul(0.012)); // faint Saturn-shine so shadowed rings never go pitch black
 
   material.colorNode = color;
-  material.opacityNode = clamp(alpha.mul(0.98).add(fwd.mul(0.35)), 0, 1);
+  // Slant path: grazing views traverse more ring material — optical depth
+  // scales with 1/|cos| of the view angle to the plane.
+  const slant = clamp(float(1.0).div(max(abs(V.y), 0.15)), 1.0, 6.0);
+  const tau = oneMinus(alpha).max(1e-4).log().negate(); // alpha -> optical depth
+  const slantAlpha = oneMinus(tau.mul(slant).negate().exp());
+  material.opacityNode = clamp(slantAlpha.mul(0.98).add(fwd.mul(0.35)), 0, 1);
   return material;
 }

@@ -9,7 +9,9 @@ import { Sun } from './scene/Sun.ts';
 import { loadAllMaps } from './materials/textures.ts';
 import { FocusControls } from './camera/FocusControls.ts';
 import { sunDirectionAt } from './data/sunDirection.ts';
-import { sunDirUniform, sunVisibilityUniform } from './materials/sharedUniforms.ts';
+import {
+  edgeOnUniform, slabVisUniform, sunDirUniform, sunVisibilityUniform,
+} from './materials/sharedUniforms.ts';
 import { saturnShadowOnMoon } from './physics/eclipse.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
 import { Hud } from './ui/hud.ts';
@@ -92,6 +94,15 @@ async function boot(): Promise<void> {
     sunVisibilityUniform.value = saturnShadowOnMoon(
       camera.position, sunDir, system.ringProfile.opacityAt,
     );
+
+    // Ring-plane proximity factors: edge-on rim ribbon + fly-through slab.
+    const camLen = Math.max(camera.position.length(), 1e-3);
+    const sinElev = Math.abs(camera.position.y) / camLen;
+    const camR = Math.hypot(camera.position.x, camera.position.z);
+    const overRings = camR > 55 && camR < 160 ? 1 : 0;
+    edgeOnUniform.value = (1 - Math.min(1, sinElev / 0.01)) * 0.25;
+    slabVisUniform.value =
+      Math.max(0, 1 - Math.abs(camera.position.y) / 1.6) * overRings;
 
     hud.setDate(clock.date);
     // Refresh camera-distance stat cheaply (twice a second with the FPS meter).

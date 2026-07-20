@@ -25,3 +25,9 @@ export const cloudPhaseUniform = uniform(0);
 
 /** 0..1 — how much of the solar disk the camera can see (drives lens flare). */
 export const sunVisibilityUniform = uniform(1);
+
+/** 0..1 — how edge-on the camera is to the ring plane (drives the rim ribbon). */
+export const edgeOnUniform = uniform(0);
+
+/** 0..1 — proximity of the camera to the ring plane (drives the particle slab). */
+export const slabVisUniform = uniform(0);
