@@ -21,9 +21,9 @@ import type { BodyMaps } from '../materials/textures.ts';
 import { createRingsMaterial } from '../materials/ringsMaterial.ts';
 import { createSaturnMaterial } from '../materials/saturnMaterial.ts';
 import { createMoonMaterial } from '../materials/moonMaterials.ts';
-import { createAtmosphereShell } from '../materials/atmospheres.ts';
 import { createRaymarchedAtmosphere } from '../materials/raymarchAtmosphere.ts';
-import { createEnceladusPlumes } from '../effects/plumes.ts';
+import { createEnceladusPlumes, type PlumeSystem } from '../effects/plumes.ts';
+import { createERing } from '../effects/eRing.ts';
 import {
   cloudPhaseUniform, edgeOnUniform, moonShadowUniforms, spokePhaseUniform,
 } from '../materials/sharedUniforms.ts';
@@ -100,6 +100,7 @@ export class SaturnSystem {
   readonly group = new Group();
   readonly bodies = new Map<string, SystemBody>();
   readonly ringProfile: RingProfile;
+  readonly plumeSystems: PlumeSystem[] = [];
   private readonly ringshine: Ringshine;
   private readonly orbitLines: Line[] = [];
   // High tessellation: real displacement needs vertices (limb silhouettes).
@@ -130,7 +131,7 @@ export class SaturnSystem {
       // Saturn's visible haze is warm amber (ammonia aerosols), only a
       // faint blue Rayleigh component.
       rayleigh: [0.30, 0.26, 0.28],
-      mie: 1.5,
+      mie: [1.5, 1.5, 1.5],
       mieG: 0.72,
       intensity: 3.5,
       steps: 16,
@@ -149,6 +150,9 @@ export class SaturnSystem {
 
     // F ring: kinked clumpy strands, strongly forward-scattering.
     for (const strand of createFRing()) saturnAnchor.add(strand);
+
+    // E ring: tenuous forward-scattering torus fed by Enceladus.
+    saturnAnchor.add(createERing());
 
     // Volumetric fly-through slab (fades in near the ring plane).
     saturnAnchor.add(createRingSlab(this.ringProfile.texture));
@@ -195,16 +199,24 @@ export class SaturnSystem {
       this.group.add(line);
 
       if (def.id === 'titan') {
-        // Main orange haze hugging the limb + detached blue upper haze layer.
-        mesh.add(createAtmosphereShell(1, {
-          color: [1.0, 0.62, 0.26], scale: 1.045, rimPower: 2.2, intensity: 1.3, forwardScatter: 2.0,
-        }));
-        mesh.add(createAtmosphereShell(1, {
-          color: [0.45, 0.62, 1.0], scale: 1.10, rimPower: 5.0, intensity: 0.4, forwardScatter: 1.0,
+        // Raymarched haze: dense chromatic Mie (orange limb, reddened
+        // backlight) + a thin blue Rayleigh upper layer — the colors emerge
+        // from the scattering integral instead of painted shells.
+        mesh.add(createRaymarchedAtmosphere({
+          bodyRadius: 1,
+          shellRadius: 1.28,
+          scaleHeight: 0.075,
+          rayleigh: [0.05, 0.09, 0.24],
+          mie: [5.5, 3.0, 0.85],
+          mieG: 0.70,
+          intensity: 2.2,
+          steps: 16,
         }));
       }
       if (def.id === 'enceladus') {
-        mesh.add(createEnceladusPlumes());
+        const plumes = createEnceladusPlumes();
+        mesh.add(plumes.mesh);
+        this.plumeSystems.push(plumes);
       }
     }
   }

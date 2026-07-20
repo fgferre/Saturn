@@ -24,7 +24,8 @@ function makeGlowTexture(): CanvasTexture {
   g.addColorStop(0.0, 'rgba(255,255,255,1)');
   g.addColorStop(0.05, 'rgba(255,252,240,1)');
   g.addColorStop(0.12, 'rgba(255,238,200,0.35)');
-  g.addColorStop(0.35, 'rgba(255,220,160,0.07)');
+  g.addColorStop(0.30, 'rgba(255,220,160,0.06)');
+  g.addColorStop(0.46, 'rgba(255,205,130,0)'); // fully out before the quad edge
   g.addColorStop(1.0, 'rgba(255,205,130,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);

@@ -132,7 +132,7 @@ function titanSurface(): MeshStandardNodeMaterial {
   // We never see Titan's surface — this is the top of its haze deck.
   const p = normalize(positionLocal);
   const lat = p.y;
-  let color: NodeObj = mix(vec3(0.82, 0.55, 0.24), vec3(0.70, 0.42, 0.16), smoothstep(-0.2, 0.9, lat));
+  let color: NodeObj = mix(vec3(0.66, 0.40, 0.13), vec3(0.52, 0.29, 0.09), smoothstep(-0.2, 0.9, lat));
   // North polar hood: darker, slightly bluish collar.
   color = mix(color, vec3(0.45, 0.38, 0.28), smoothstep(0.72, 0.95, lat).mul(0.5));
   // Extremely soft banding.

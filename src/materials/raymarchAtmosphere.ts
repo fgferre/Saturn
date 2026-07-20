@@ -30,8 +30,8 @@ export interface AtmosphereParams {
   scaleHeight: number;
   /** Rayleigh scattering coefficient per RGB channel (relative). */
   rayleigh: [number, number, number];
-  /** Mie scattering strength (wavelength-neutral). */
-  mie: number;
+  /** Mie scattering coefficient per RGB channel (chromatic haze, e.g. Titan). */
+  mie: [number, number, number];
   /** Mie anisotropy g (0.6–0.9 = strongly forward). */
   mieG: number;
   /** Overall brightness multiplier. */
@@ -53,7 +53,6 @@ export function createRaymarchedAtmosphere(p: AtmosphereParams): Mesh {
   const Ra = p.shellRadius;
   const H = p.scaleHeight * Rp;
   const sigmaR = p.rayleigh;
-  const sigmaM = p.mie;
   const g = p.mieG;
 
   const output = Fn(() => {
@@ -86,6 +85,7 @@ export function createRaymarchedAtmosphere(p: AtmosphereParams): Mesh {
       .div(pow(float(1 + g2).sub(cosTheta.mul(2 * g)), 1.5)).toVar();
 
     const sR = vec3(...sigmaR).toVar();
+    const sM = vec3(...p.mie).toVar();
     const inscatter = vec3(0).toVar();
     const transmittance = vec3(1).toVar();
 
@@ -100,12 +100,12 @@ export function createRaymarchedAtmosphere(p: AtmosphereParams): Mesh {
       const upSun = dot(normalize(pos), sunL);
       const sunPath = float(1.0).div(max(upSun.mul(0.9).add(0.12), 0.02));
       const sunDepth = exp(clamp(h, 0.0, 60.0).negate()).mul(sunPath).mul(H * 2.0);
-      const sunTrans = exp(sR.add(sigmaM).mul(sunDepth).negate());
+      const sunTrans = exp(sR.add(sM).mul(sunDepth).negate());
 
       inscatter.addAssign(
-        sR.mul(phR).add(phM.mul(sigmaM)).mul(density).mul(sunTrans).mul(transmittance),
+        sR.mul(phR).add(sM.mul(phM)).mul(density).mul(sunTrans).mul(transmittance),
       );
-      transmittance.mulAssign(exp(sR.add(sigmaM).mul(density).negate()));
+      transmittance.mulAssign(exp(sR.add(sM).mul(density).negate()));
     });
 
     const sunColor = vec3(1.0, 0.96, 0.90);

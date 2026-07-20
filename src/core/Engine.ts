@@ -44,7 +44,7 @@ export class Engine {
     // occlusion test updates sunVisibilityUniform each frame).
     const streak = anamorphic(scenePass, float(3.0), float(4), 24)
       .mul(sunVisibilityUniform).mul(0.12);
-    const ghosts = lensflare(bloomPass, { threshold: float(1.5), ghostSamples: float(3) })
+    const ghosts = lensflare(bloomPass, { threshold: float(2.6), ghostSamples: float(3) })
       .mul(sunVisibilityUniform).mul(0.35);
     // Cinematic finish: gentle vignette + fine animated film grain.
     const vignette = oneMinus(screenUV.sub(0.5).length().pow(2.2).mul(0.5));
@@ -78,6 +78,17 @@ export class Engine {
   }
 
   private capturing = false;
+  private readonly computes: object[] = [];
+
+  /** Register a compute pass to run every frame (GPU particles etc.). */
+  addCompute(node: object): void {
+    this.computes.push(node);
+  }
+
+  /** Run a compute pass once, now (initialization kernels). */
+  async computeOnce(node: object): Promise<void> {
+    await this.renderer.computeAsync(node as never);
+  }
 
   /** Start the frame loop; cb receives dt in seconds (clamped for tab-switch spikes). */
   start(cb: (dt: number) => void): void {
@@ -88,12 +99,14 @@ export class Engine {
       const dt = Math.min((now - last) / 1000, 0.1);
       last = now;
       cb(dt);
+      for (const n of this.computes) this.renderer.compute(n as never);
       this.post.render();
     });
   }
 
   /** Render a single frame outside the rAF loop (headless testing). */
   async renderOnce(): Promise<void> {
+    for (const n of this.computes) await this.renderer.computeAsync(n as never);
     await this.post.renderAsync();
   }
 

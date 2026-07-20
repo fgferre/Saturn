@@ -1,107 +1,129 @@
 /**
- * Enceladus' south-polar geysers: GPU-animated instanced sprites erupting
- * from the tiger-stripe region. Positions, sizes and fading are computed
- * entirely in TSL (no per-frame CPU work).
+ * Enceladus' south-polar geysers as GPU compute particles: a ballistic
+ * kernel integrates each grain (launch from a tiger-stripe vent, local
+ * gravity pulls it back; escaped grains recycle) into storage buffers that
+ * an instanced-sprite material renders with forward-scattered lighting —
+ * the plumes glow when backlit, exactly as Cassini photographed them.
  *
- * Instanced camera-facing quads (SpriteNodeMaterial) rather than THREE.Points:
- * WebGPU rasterizes point primitives as exactly 1 pixel, so Points cannot
- * express particle size on that backend.
+ * On WebGPU the kernel is a real compute pass; the WebGL2 fallback runs it
+ * via transform feedback (the kernel only does 1:1 writes, no atomics).
  *
- * Coordinates are in the moon's local unit-sphere frame (the mesh scale
- * turns them into world units), so the jets stay locked to the stripes.
+ * Coordinates are the moon's local unit-sphere frame (mesh scale maps to
+ * world), so the vents stay locked to the tiger stripes.
  */
 
-import {
-  AdditiveBlending, InstancedBufferAttribute, InstancedBufferGeometry,
-  Mesh, PlaneGeometry, Vector3,
-} from 'three';
+import { InstancedBufferGeometry, Mesh, PlaneGeometry } from 'three';
+import { AdditiveBlending } from 'three';
 import { SpriteNodeMaterial } from 'three/webgpu';
+import type { ComputeNode } from 'three/webgpu';
 import {
-  cos, float, fract, instancedBufferAttribute, mix, oneMinus, pow, sin,
-  smoothstep, time, uv, vec3,
+  Fn, If, cameraPosition, clamp, cos, dot, exp, float, hash, instanceIndex,
+  instancedArray, max, mix, normalize, pow, sin, smoothstep,
+  uniform, uv, vec3,
 } from 'three/tsl';
-import { makeRng } from '../utils/noise.ts';
+import { sunDirUniform } from '../materials/sharedUniforms.ts';
 
-const PARTICLE_COUNT = 1600;
-const JET_COUNT = 8;
-/** Max plume height in unit-sphere units (≈ 500 km for Enceladus' 252 km radius). */
-const MAX_HEIGHT = 3.2;
+/** Local gravity strength tuned so arcs top out ~2.5 radii up. */
+const GRAVITY = 0.16;
 
-export function createEnceladusPlumes(): Mesh {
-  const rng = makeRng(20260719);
+export interface PlumeSystem {
+  mesh: Mesh;
+  init: ComputeNode;
+  update: ComputeNode;
+  /** Real-seconds timestep uniform, set each frame. */
+  dt: { value: number };
+}
 
-  // Jet sources along the tiger stripes (south polar, ~75–85°S).
-  const jets: { origin: Vector3; dir: Vector3 }[] = [];
-  for (let j = 0; j < JET_COUNT; j++) {
-    const lon = (j / JET_COUNT) * Math.PI * 2 + rng() * 0.6;
-    const lat = -(Math.PI / 2) + (0.10 + rng() * 0.14); // near south pole
-    const origin = new Vector3(
-      Math.cos(lat) * Math.cos(lon),
-      Math.sin(lat),
-      Math.cos(lat) * Math.sin(lon),
-    );
-    // Mostly along the local "down" (away from center), canted slightly.
-    const dir = origin.clone()
-      .add(new Vector3((rng() - 0.5) * 0.35, -0.15, (rng() - 0.5) * 0.35))
-      .normalize();
-    jets.push({ origin, dir });
-  }
+export function createEnceladusPlumes(count = 262144): PlumeSystem {
+  const posBuf = instancedArray(count, 'vec3');
+  const velBuf = instancedArray(count, 'vec3');
+  const lifeBuf = instancedArray(count, 'float');
 
-  const origins = new Float32Array(PARTICLE_COUNT * 3);
-  const dirs = new Float32Array(PARTICLE_COUNT * 3);
-  const rand = new Float32Array(PARTICLE_COUNT);
+  const dtUniform = uniform(0);
 
-  for (let i = 0; i < PARTICLE_COUNT; i++) {
-    const jet = jets[i % JET_COUNT];
-    const spread = 0.10;
-    origins.set([jet.origin.x, jet.origin.y, jet.origin.z], i * 3);
-    dirs.set([
-      jet.dir.x + (rng() - 0.5) * spread,
-      jet.dir.y + (rng() - 0.5) * spread * 0.5,
-      jet.dir.z + (rng() - 0.5) * spread,
-    ], i * 3);
-    rand[i] = rng();
-  }
+  const init = Fn(() => {
+    const i = instanceIndex.toFloat();
+    posBuf.element(instanceIndex).assign(vec3(0, -2, 0)); // hidden until spawn
+    velBuf.element(instanceIndex).assign(vec3(0, 0, 0));
+    // Staggered negative life ramps the plume in over the first seconds.
+    lifeBuf.element(instanceIndex).assign(hash(i.add(3.7)).mul(-9.0));
+  })().compute(count);
 
-  // One shared quad, instanced per particle.
+  const update = Fn(() => {
+    const i = instanceIndex.toFloat();
+    const pos = posBuf.element(instanceIndex).toVar();
+    const vel = velBuf.element(instanceIndex).toVar();
+    const life = lifeBuf.element(instanceIndex).toVar();
+
+    life.subAssign(dtUniform);
+    pos.addAssign(vel.mul(dtUniform));
+    // Inverse-square local gravity toward the moon's center.
+    const r = max(pos.length(), 0.35);
+    vel.subAssign(normalize(pos).mul(float(GRAVITY).div(r.mul(r))).mul(dtUniform));
+
+    // Recycle: expired, re-impacted, or escaped far.
+    If(life.lessThan(0.0).or(pos.length().lessThan(0.995)).or(pos.length().greaterThan(6.0)), () => {
+      // Vent on one of 8 tiger-stripe jets, derived from the particle index.
+      const jet = i.mod(8);
+      const hj = hash(i.add(0.17));
+      const hk = hash(i.add(9.31));
+      const lon = jet.div(8).mul(Math.PI * 2).add(hj.mul(0.6));
+      const lat = float(-Math.PI / 2).add(0.10).add(hk.mul(0.14));
+      const origin = vec3(cos(lat).mul(cos(lon)), sin(lat), cos(lat).mul(sin(lon)));
+
+      const h1 = hash(i.add(1.3));
+      const h2 = hash(i.add(5.9));
+      const h3 = hash(i.add(11.1));
+      const dir = normalize(origin.add(vec3(
+        h1.sub(0.5).mul(0.45),
+        float(-0.30),
+        h2.sub(0.5).mul(0.45),
+      )));
+      pos.assign(origin.mul(1.002));
+      vel.assign(dir.mul(h3.mul(0.45).add(0.55)));
+      life.assign(h1.mul(5.0).add(5.0));
+    });
+
+    posBuf.element(instanceIndex).assign(pos);
+    velBuf.element(instanceIndex).assign(vel);
+    lifeBuf.element(instanceIndex).assign(life);
+  })().compute(count);
+
+  // --- Render: instanced soft sprites reading the storage buffers ---
   const quad = new PlaneGeometry(1, 1);
   const geometry = new InstancedBufferGeometry();
   geometry.index = quad.index;
   geometry.attributes.position = quad.attributes.position;
   geometry.attributes.uv = quad.attributes.uv;
-  geometry.instanceCount = PARTICLE_COUNT;
-  geometry.setAttribute('jetOrigin', new InstancedBufferAttribute(origins, 3));
-  geometry.setAttribute('jetDir', new InstancedBufferAttribute(dirs, 3));
-  geometry.setAttribute('seed', new InstancedBufferAttribute(rand, 1));
+  geometry.instanceCount = count;
 
   const material = new SpriteNodeMaterial();
   material.transparent = true;
   material.blending = AdditiveBlending;
   material.depthWrite = false;
 
-  const seed = instancedBufferAttribute(geometry.attributes.seed as InstancedBufferAttribute);
-  const origin = instancedBufferAttribute(geometry.attributes.jetOrigin as InstancedBufferAttribute);
-  const dir = instancedBufferAttribute(geometry.attributes.jetDir as InstancedBufferAttribute);
+  const pos = posBuf.toAttribute();
+  const life = lifeBuf.toAttribute();
+  material.positionNode = pos;
 
-  // Each particle loops on its own phase; slow stately rise (~40 s cycle).
-  const p = fract(time.mul(0.025).add(seed.mul(7.31)));
-  // Ballistic ease-out: fast at the vent, slowing with altitude.
-  const h = oneMinus(oneMinus(p).mul(oneMinus(p))).mul(MAX_HEIGHT);
-  // Slight lateral curl so jets feather outward as they climb.
-  const ang = seed.mul(6.2832).add(p.mul(2.0));
-  const lateral = vec3(cos(ang), float(0), sin(ang)).mul(p.mul(p).mul(0.22));
-  material.positionNode = origin.add(dir.mul(h)).add(lateral);
+  const alt = pos.length().sub(1.0);
+  const disc = smoothstep(0.5, 0.06, uv().sub(0.5).length());
+  // Forward scattering: icy grains glow against the light.
+  const V = normalize(cameraPosition.sub(pos)); // local ≈ world dir at these scales
+  const fwd = pow(clamp(dot(V, sunDirUniform).negate(), 0, 1), 3).mul(2.4).add(0.18);
 
-  // Soft round particle from the quad's uv.
-  const disc = smoothstep(0.5, 0.05, uv().sub(0.5).length());
-  const fadeIn = smoothstep(0.0, 0.04, p);
-  const fadeOut = pow(oneMinus(p), 1.8);
-  material.opacityNode = fadeIn.mul(fadeOut).mul(disc).mul(0.085);
-  material.colorNode = mix(vec3(0.85, 0.93, 1.0), vec3(0.55, 0.70, 0.95), p);
-  // World-ish (local-unit) size: grows as the spray expands and thins.
-  material.scaleNode = float(0.025).add(p.mul(0.28));
+  const visible = smoothstep(0.0, 0.15, life); // hidden while life < 0
+  material.opacityNode = disc
+    .mul(visible)
+    .mul(exp(alt.negate().div(1.4)))
+    .mul(fwd)
+    .mul(0.055);
+  material.colorNode = mix(vec3(0.80, 0.90, 1.0), vec3(0.95, 0.97, 1.0), clamp(alt.div(3), 0, 1));
+  material.scaleNode = clamp(alt.mul(0.05).add(0.015), 0.012, 0.16)
+    .mul(hash(instanceIndex.toFloat().add(2.9)).mul(0.7).add(0.65));
 
   const mesh = new Mesh(geometry, material);
-  mesh.frustumCulled = false; // animated positions exceed the static bounds
-  return mesh;
+  mesh.frustumCulled = false;
+
+  return { mesh, init, update, dt: dtUniform };
 }

@@ -31,3 +31,6 @@ export const edgeOnUniform = uniform(0);
 
 /** 0..1 — proximity of the camera to the ring plane (drives the particle slab). */
 export const slabVisUniform = uniform(0);
+
+/** 0..1 — E-ring visibility (fades out when the camera is inside the torus). */
+export const eRingVisUniform = uniform(1);

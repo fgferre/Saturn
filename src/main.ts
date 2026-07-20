@@ -10,7 +10,8 @@ import { loadAllMaps } from './materials/textures.ts';
 import { FocusControls } from './camera/FocusControls.ts';
 import { sunDirectionAt } from './data/sunDirection.ts';
 import {
-  edgeOnUniform, slabVisUniform, sunDirUniform, sunVisibilityUniform,
+  eRingVisUniform, edgeOnUniform, slabVisUniform, sunDirUniform,
+  sunVisibilityUniform,
 } from './materials/sharedUniforms.ts';
 import { saturnShadowOnMoon } from './physics/eclipse.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
@@ -25,6 +26,11 @@ async function boot(): Promise<void> {
   const clock = new SimClock();
   const maps = await loadAllMaps();
   const system = new SaturnSystem(maps);
+  // GPU particle systems: seed once, then integrate every frame.
+  for (const p of system.plumeSystems) {
+    await engine.computeOnce(p.init);
+    engine.addCompute(p.update);
+  }
   const sun = new Sun();
   // Real NASA starmap sky when available, procedural starfield otherwise.
   scene.add(system.group, sun.group, maps.starmap ? createSky(maps.starmap) : createStarfield());
@@ -80,6 +86,7 @@ async function boot(): Promise<void> {
 
   const frame = (dt: number): void => {
     clock.update(dt);
+    for (const p of system.plumeSystems) p.dt.value = dt;
 
     sunDirectionAt(clock.jd, sunDir);
     sunDirUniform.value.copy(sunDir);
@@ -103,6 +110,11 @@ async function boot(): Promise<void> {
     edgeOnUniform.value = (1 - Math.min(1, sinElev / 0.01)) * 0.25;
     slabVisUniform.value =
       Math.max(0, 1 - Math.abs(camera.position.y) / 1.6) * overRings;
+    // E ring: a diffuse torus looks wrong from inside — fade it out there.
+    const eRingProximity = Math.max(
+      Math.abs(camR - 238) / 90, Math.abs(camera.position.y) / 25,
+    );
+    eRingVisUniform.value = Math.min(1, eRingProximity);
 
     hud.setDate(clock.date);
     // Refresh camera-distance stat cheaply (twice a second with the FPS meter).
