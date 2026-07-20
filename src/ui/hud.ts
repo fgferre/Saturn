@@ -2,6 +2,7 @@
 
 import './hud.css';
 import type { BodyDefinition } from '../orbital/types.ts';
+import { PRESETS, quality, setQuality, type QualityName } from '../core/quality.ts';
 
 export interface HudCallbacks {
   onFocus(id: string): void;
@@ -12,6 +13,7 @@ export interface HudCallbacks {
   onToggleLabels(v: boolean): void;
   onToggleDrift(v: boolean): void;
   onExposure(v: number): void;
+  onCinema(): void;
 }
 
 const SPEEDS: { label: string; value: number }[] = [
@@ -111,6 +113,11 @@ export class Hud {
       <div class="hud-exposure">
         <span>EV</span>
         <input type="range" min="0.5" max="2.6" step="0.05" value="1.4" data-t="exposure">
+      </div>
+      <div class="hud-quality">
+        <span>Quality</span>
+        <div class="hud-quality-btns"></div>
+        <button type="button" class="hud-cinema" title="Cinematic tour (Esc exits)">✦ Cinema</button>
       </div>`;
     hud.appendChild(info);
     this.infoName = info.querySelector('h2')!;
@@ -124,6 +131,18 @@ export class Hud {
       .addEventListener('change', (e) => cb.onToggleDrift((e.target as HTMLInputElement).checked));
     info.querySelector<HTMLInputElement>('input[data-t="exposure"]')!
       .addEventListener('input', (e) => cb.onExposure(Number((e.target as HTMLInputElement).value)));
+
+    const qBtns = info.querySelector('.hud-quality-btns')!;
+    for (const name of ['low', 'med', 'high', 'ultra'] as QualityName[]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = PRESETS[name].label;
+      if (quality.name === name) b.classList.add('active');
+      b.addEventListener('click', () => { if (name !== quality.name) setQuality(name); });
+      qBtns.appendChild(b);
+    }
+    info.querySelector<HTMLButtonElement>('.hud-cinema')!
+      .addEventListener('click', () => cb.onCinema());
   }
 
   setFocused(id: string): void {

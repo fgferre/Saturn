@@ -23,7 +23,9 @@
   border-radius: 10px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  transition: opacity 0.8s;
 }
+.body-label { transition: opacity 0.8s; }
 
 /* Brand / status — top left */
 .hud-brand {
@@ -177,6 +179,47 @@
   color: var(--hud-dim);
 }
 .hud-exposure input { flex: 1; accent-color: var(--accent); height: 14px; }
+
+.hud-quality {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--hud-dim);
+  flex-wrap: wrap;
+}
+.hud-quality-btns { display: flex; gap: 3px; }
+.hud-quality button, .hud-cinema {
+  all: unset;
+  cursor: pointer;
+  border: 1px solid var(--hud-border);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  color: var(--hud-dim);
+  transition: color 0.15s, border-color 0.15s;
+}
+.hud-quality button:hover, .hud-cinema:hover { color: var(--hud-text); }
+.hud-quality button.active { color: var(--accent); border-color: rgba(232,192,122,0.5); }
+.hud-cinema { margin-left: auto; color: var(--accent); }
+
+/* Cinema mode: HUD melts away, labels too. */
+body.cinema .panel,
+body.cinema .body-label { opacity: 0; pointer-events: none; transition: opacity 0.8s; }
+.cinema-exit {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 10;
+  font-size: 11px;
+  color: rgba(223, 230, 238, 0.4);
+  font-family: system-ui, sans-serif;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.8s;
+}
+body.cinema .cinema-exit { opacity: 1; }
 
 /* Body labels over the 3D view */
 .body-label {

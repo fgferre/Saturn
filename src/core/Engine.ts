@@ -6,18 +6,26 @@
 
 import { AgXToneMapping, PerspectiveCamera, RenderTarget, Scene } from 'three';
 import { PostProcessing, WebGPURenderer } from 'three/webgpu';
-import { float, oneMinus, pass, screenUV } from 'three/tsl';
+import { float, oneMinus, pass, screenUV, uniform, vec2 } from 'three/tsl';
+import type { ShaderNodeObject } from 'three/tsl';
+import type { Node } from 'three/webgpu';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { anamorphic } from 'three/addons/tsl/display/AnamorphicNode.js';
 import { lensflare } from 'three/addons/tsl/display/LensflareNode.js';
+import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
+import { chromaticAberration } from 'three/addons/tsl/display/ChromaticAberrationNode.js';
 import { sunVisibilityUniform } from '../materials/sharedUniforms.ts';
+import { quality } from './quality.ts';
 
 export class Engine {
   readonly renderer: WebGPURenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
   readonly backendName: 'WebGPU' | 'WebGL2';
+  /** DOF focus distance (view-space) and aperture, fed per frame from main. */
+  readonly dofFocus = uniform(300);
+  readonly dofAperture = uniform(0.0);
   private readonly post: PostProcessing;
 
   private constructor(renderer: WebGPURenderer, container: HTMLElement) {
@@ -29,7 +37,7 @@ export class Engine {
     const height = container.clientHeight || 720;
     this.camera = new PerspectiveCamera(45, width / height, 0.05, 120000);
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.dprCap));
     renderer.setSize(width, height);
     // AgX: gentler highlight rolloff than ACES — closest to Cassini's
     // natural-color look (calibrated against PIA21345).
@@ -37,22 +45,37 @@ export class Engine {
     renderer.toneMappingExposure = 1.4;
 
     // MSAA on the scene pass only — the final fullscreen quad doesn't need it.
-    const scenePass = pass(this.scene, this.camera, { samples: 4 });
+    const scenePass = pass(this.scene, this.camera, { samples: quality.msaaSamples });
     const bloomPass = bloom(scenePass, 0.45, 0.35, 0.82);
-    // Physical lens system driven by the HDR sun disk: anamorphic streak +
-    // ghost flares, both gated by how visible the sun actually is (CPU
-    // occlusion test updates sunVisibilityUniform each frame).
-    const streak = anamorphic(scenePass, float(3.0), float(4), 24)
-      .mul(sunVisibilityUniform).mul(0.12);
-    const ghosts = lensflare(bloomPass, { threshold: float(2.6), ghostSamples: float(3) })
-      .mul(sunVisibilityUniform).mul(0.35);
-    // Cinematic finish: gentle vignette + fine animated film grain.
+    let comp: ShaderNodeObject<Node> = scenePass.add(bloomPass);
+
+    // Physical lens system driven by the HDR sun disk, gated by how visible
+    // the sun actually is (CPU occlusion test -> sunVisibilityUniform).
+    if (quality.anamorphic) {
+      comp = comp.add(
+        anamorphic(scenePass, float(3.0), float(4), 24).mul(sunVisibilityUniform).mul(0.12),
+      );
+    }
+    if (quality.lensflare) {
+      comp = comp.add(
+        lensflare(bloomPass, { threshold: float(2.6), ghostSamples: float(3) })
+          .mul(sunVisibilityUniform).mul(0.35),
+      );
+    }
+
+    // Depth of field focused on the tracked body (uniforms fed per frame).
+    if (quality.dof) {
+      comp = dof(comp, scenePass.getViewZNode(), this.dofFocus, this.dofAperture, float(0.008));
+    }
+
+    // Cinematic finish: subtle chromatic fringing at the frame edges,
+    // gentle vignette, fine animated film grain. (Center must be explicit —
+    // the r178 addon passes its null default straight into the node graph.)
+    comp = chromaticAberration(comp, float(0.35), vec2(0.5, 0.5), float(1.008));
     const vignette = oneMinus(screenUV.sub(0.5).length().pow(2.2).mul(0.5));
+    comp = comp.mul(vignette);
     this.post = new PostProcessing(renderer);
-    this.post.outputNode = film(
-      scenePass.add(bloomPass).add(streak).add(ghosts).mul(vignette),
-      float(0.035),
-    );
+    this.post.outputNode = quality.filmGrain > 0 ? film(comp, float(quality.filmGrain)) : comp;
 
     this.backendName = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
       ? 'WebGPU'

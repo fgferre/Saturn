@@ -31,6 +31,7 @@ import { createFRing } from '../materials/fRing.ts';
 import { createRingSlab } from '../effects/ringSlab.ts';
 import { saturnShadowOnMoon } from '../physics/eclipse.ts';
 import { Ringshine } from '../physics/ringshine.ts';
+import { quality } from '../core/quality.ts';
 import { fbm3D } from '../utils/noise.ts';
 
 export interface SystemBody {
@@ -104,7 +105,7 @@ export class SaturnSystem {
   private readonly ringshine: Ringshine;
   private readonly orbitLines: Line[] = [];
   // High tessellation: real displacement needs vertices (limb silhouettes).
-  private readonly moonGeometry = new SphereGeometry(1, 192, 96);
+  private readonly moonGeometry = new SphereGeometry(1, ...quality.moonSegments);
 
   constructor(maps?: BodyMaps) {
     this.ringProfile = createRingProfile(maps?.ringProfile);
@@ -134,7 +135,7 @@ export class SaturnSystem {
       mie: [1.5, 1.5, 1.5],
       mieG: 0.72,
       intensity: 3.5,
-      steps: 16,
+      steps: quality.raymarchSteps,
       ySquash: squash,
     }));
 
@@ -155,7 +156,7 @@ export class SaturnSystem {
     saturnAnchor.add(createERing());
 
     // Volumetric fly-through slab (fades in near the ring plane).
-    saturnAnchor.add(createRingSlab(this.ringProfile.texture));
+    saturnAnchor.add(createRingSlab(this.ringProfile.texture, quality.slabCount));
 
     // Edge-on rim: from grazing angles the infinitely thin plane vanishes;
     // this faint ribbon at the A-ring outer edge keeps a bright line alive.
@@ -210,11 +211,11 @@ export class SaturnSystem {
           mie: [5.5, 3.0, 0.85],
           mieG: 0.70,
           intensity: 2.2,
-          steps: 16,
+          steps: quality.raymarchSteps,
         }));
       }
       if (def.id === 'enceladus') {
-        const plumes = createEnceladusPlumes();
+        const plumes = createEnceladusPlumes(quality.plumeCount);
         mesh.add(plumes.mesh);
         this.plumeSystems.push(plumes);
       }

@@ -17,6 +17,7 @@ import { saturnShadowOnMoon } from './physics/eclipse.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
 import { Hud } from './ui/hud.ts';
 import { BodyLabels } from './ui/labels.ts';
+import { autoTuneDown, quality } from './core/quality.ts';
 
 async function boot(): Promise<void> {
   const container = document.getElementById('app')!;
@@ -74,7 +75,48 @@ async function boot(): Promise<void> {
       controls.controls.autoRotateSpeed = 0.12;
     },
     onExposure: (v) => { engine.renderer.toneMappingExposure = v; },
+    onCinema: () => cinema.enter(),
   });
+
+  // --- Cinema mode: HUD fades out, slow drift, timed tour between bodies ---
+  const cinema = {
+    active: false,
+    timer: 0,
+    stop: 0,
+    stops: ['saturn', 'enceladus', 'titan', 'mimas', 'iapetus', 'saturn'],
+    exitEl: (() => {
+      const el = document.createElement('div');
+      el.className = 'cinema-exit';
+      el.textContent = 'Esc para sair';
+      document.body.appendChild(el);
+      return el;
+    })(),
+    enter() {
+      this.active = true;
+      this.timer = 0;
+      this.stop = 0;
+      document.body.classList.add('cinema');
+      controls.controls.autoRotate = true;
+      controls.controls.autoRotateSpeed = 0.25;
+      focusBody(this.stops[0]);
+    },
+    exit() {
+      if (!this.active) return;
+      this.active = false;
+      document.body.classList.remove('cinema');
+      controls.controls.autoRotate = false;
+    },
+    update(dt: number) {
+      if (!this.active) return;
+      this.timer += dt;
+      if (this.timer > 22) {
+        this.timer = 0;
+        this.stop = (this.stop + 1) % this.stops.length;
+        focusBody(this.stops[this.stop]);
+      }
+    },
+  };
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') cinema.exit(); });
   const labels = new BodyLabels(allBodies, focusBody);
   hud.setFocused('saturn');
   hud.setInfo(SATURN);
@@ -83,6 +125,10 @@ async function boot(): Promise<void> {
   const camDist = new Vector3();
   let fpsAccum = 0;
   let fpsFrames = 0;
+  // One-shot auto-tuner: measure the first seconds, step down if struggling.
+  let tuneAccum = 0;
+  let tuneFrames = 0;
+  let tuned = false;
 
   const frame = (dt: number): void => {
     clock.update(dt);
@@ -94,7 +140,29 @@ async function boot(): Promise<void> {
 
     system.update(clock.jd, sunDir);
     controls.update(dt);
+    cinema.update(dt);
     labels.update(camera, getPos, controls.focusId);
+
+    // DOF tracks the focused body; aperture scaled so distant framings stay
+    // sharp and close fly-bys get shallow focus.
+    if (quality.dof) {
+      const focusDist = camera.position.distanceTo(controls.controls.target);
+      engine.dofFocus.value = focusDist;
+      // Hyperfocal at planetary distances (1/f² falloff): wide framings stay
+      // pin-sharp; only close fly-bys (< ~10 units) get shallow focus.
+      const f = Math.max(focusDist, 2);
+      engine.dofAperture.value = Math.min(0.01, 0.05 / (f * f));
+    }
+
+    // Auto-tune: after ~4 s of real rendering, step down once if needed.
+    if (!tuned) {
+      tuneAccum += dt;
+      tuneFrames++;
+      if (tuneAccum > 4) {
+        tuned = true;
+        autoTuneDown(tuneFrames / tuneAccum);
+      }
+    }
 
     // Lens flare gating: how much of the sun does the camera actually see?
     // (Same occlusion math as moon eclipses: Saturn's ellipsoid + ring alpha.)
