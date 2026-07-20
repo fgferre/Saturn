@@ -109,9 +109,12 @@ export class Ringshine {
         sum += faceB * a.alpha * cosIncidence * emit * solid;
       }
 
+      // Ring opening angle: the rings intercept (and re-emit) sunlight in
+      // proportion to the sine of the solar elevation over the ring plane.
+      const opening = 0.15 + 0.85 * Math.min(1, Math.abs(sunDir.y) / 0.45);
       // Normalize to a pleasing 0..1 range (scale factor folds the ring
       // albedo and solar irradiance; calibrated against PIA08329).
-      const v = Math.min(1, sum * 0.55);
+      const v = Math.min(1, sum * 0.55 * opening);
       const b = Math.round(v * 255);
       this.data[li * 4] = b;
       this.data[li * 4 + 1] = b;

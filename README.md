@@ -50,12 +50,31 @@ Append `?webgl` to the URL to force the WebGL2 backend.
   umbra go dark — lit only by *saturnshine* — and dim under ring shadows.
   Seasonally accurate: Titan shadow transits ceased after the 2025 equinox,
   while inner-moon transits still occur, exactly as in the simulation.
-- **B-ring spokes**: ghostly radial dust streaks corotating with the
-  magnetosphere — dark in backscatter, bright when backlit (a near-equinox
-  phenomenon, in season for the mid-2020s).
-- **Cinematic pipeline**: AgX tone mapping (calibrated against Cassini
-  natural color), scene-pass 4x MSAA, bloom, gentle vignette and fine film
-  grain; "Drift" toggle for a slow cinematic orbit.
+- **Ringshine**: Saturn's night side is lit by its rings — a per-frame
+  latitude LUT integrated from the real ring brightness profiles.
+- **Raymarched atmospheres**: single-scattering integral (TSL loops) for
+  Saturn's limb/terminator and Titan's haze — the orange limb and blue
+  upper fringe emerge from chromatic Mie + Rayleigh, not painted shells.
+- **Real moon topography**: Gaskell SPC shape models (Mimas, Tethys), the
+  Schenk & McKinnon 2024 global DEM (Enceladus) and the Weirich 2025 DTM
+  (Dione) baked to displacement + normal maps — real crater rims on the
+  limb. Rhea and Iapetus have no public DTM: their relief is procedural
+  (documented), including Iapetus' real ~13 km equatorial ridge as a
+  modeled feature. Surfaces shade with a Hapke-style BRDF
+  (Lommel-Seeliger × opposition surge) — the chalky full-phase look.
+- **GPU particles**: Enceladus' plumes are ballistic compute particles
+  (up to 1M on Ultra; transform-feedback fallback on WebGL2) feeding a
+  forward-scattering E ring; a volumetric particle slab fades in for ring
+  fly-throughs, with self-gravity wakes, azimuthal grain, a kinked clumpy
+  F ring and B-ring spokes on the main rings.
+- **Cinematic pipeline**: HDR sun (radiance ≫1) driving physical bloom,
+  anamorphic streak and lens ghosts gated by real sun occlusion; AgX tone
+  mapping (calibrated against Cassini natural color), DOF focused on the
+  tracked body (hyperfocal at planetary distances), subtle chromatic
+  aberration, vignette and film grain; Cinema mode with a timed tour.
+- **Quality presets**: Low / Med / High / Ultra (DPR, MSAA, raymarch steps,
+  particle counts, tessellation, lens effects) with a one-shot fps
+  auto-tuner.
 
 ## Controls
 
@@ -112,6 +131,11 @@ heliocentric anchors — the orbital module already supports any parent frame.
 - **Star map**: NASA/GSFC Scientific Visualization Studio "Deep Star Maps
   2020"; star data Gaia DR2 (ESA/Gaia/DPAC) — oriented to the real celestial
   sphere as seen from Saturn
+- **Moon topography**: Gaskell SPC shape models V2.0/V1.0 (Mimas, Tethys —
+  NASA PDS); Enceladus global DEM 200 m (Schenk & McKinnon 2024, USGS
+  Astropedia — cite Icarus 408, 115827); Dione SPC DTM (Weirich et al.
+  2025, PDS SBN). Baked by `scripts/bake-moon-relief.mjs`. Rhea and
+  Iapetus topography is **synthetic** (no public DTM exists as of 2026)
 - Color calibration reference: Cassini natural-color photographs
   (PIA21345, PIA06175)
 - Every texture is optional: if a file under `public/textures/` is missing,

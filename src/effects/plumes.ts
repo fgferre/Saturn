@@ -18,8 +18,8 @@ import { SpriteNodeMaterial } from 'three/webgpu';
 import type { ComputeNode } from 'three/webgpu';
 import {
   Fn, If, cameraPosition, clamp, cos, dot, exp, float, hash, instanceIndex,
-  instancedArray, max, mix, normalize, pow, sin, smoothstep,
-  uniform, uv, vec3,
+  instancedArray, max, mix, modelWorldMatrixInverse, normalize, pow, sin,
+  smoothstep, uniform, uv, vec3, vec4,
 } from 'three/tsl';
 import { sunDirUniform } from '../materials/sharedUniforms.ts';
 
@@ -55,14 +55,23 @@ export function createEnceladusPlumes(count = 262144): PlumeSystem {
     const vel = velBuf.element(instanceIndex).toVar();
     const life = lifeBuf.element(instanceIndex).toVar();
 
-    life.subAssign(dtUniform);
-    pos.addAssign(vel.mul(dtUniform));
-    // Inverse-square local gravity toward the moon's center.
-    const r = max(pos.length(), 0.35);
-    vel.subAssign(normalize(pos).mul(float(GRAVITY).div(r.mul(r))).mul(dtUniform));
+    // Negative life = staggered pre-spawn countdown; positive = airborne.
+    const wasAlive = life.greaterThan(0.0).toVar();
+    If(wasAlive, () => {
+      life.subAssign(dtUniform);
+      pos.addAssign(vel.mul(dtUniform));
+      // Inverse-square local gravity toward the moon's center.
+      const r = max(pos.length(), 0.35);
+      vel.subAssign(normalize(pos).mul(float(GRAVITY).div(r.mul(r))).mul(dtUniform));
+    }).Else(() => {
+      life.addAssign(dtUniform);
+    });
 
-    // Recycle: expired, re-impacted, or escaped far.
-    If(life.lessThan(0.0).or(pos.length().lessThan(0.995)).or(pos.length().greaterThan(6.0)), () => {
+    // (Re)spawn: countdown finished, flight expired, re-impacted, or escaped.
+    const born = wasAlive.not().and(life.greaterThanEqual(0.0));
+    const expired = wasAlive.and(life.lessThanEqual(0.0));
+    If(born.or(expired)
+      .or(pos.length().lessThan(0.995)).or(pos.length().greaterThan(6.0)), () => {
       // Vent on one of 8 tiger-stripe jets, derived from the particle index.
       const jet = i.mod(8);
       const hj = hash(i.add(0.17));
@@ -80,7 +89,9 @@ export function createEnceladusPlumes(count = 262144): PlumeSystem {
         h2.sub(0.5).mul(0.45),
       )));
       pos.assign(origin.mul(1.002));
-      vel.assign(dir.mul(h3.mul(0.45).add(0.55)));
+      // 0.32..0.58 vs escape speed sqrt(2*GRAVITY) ≈ 0.566: most grains arc
+      // back ballistically, the fastest few escape — those feed the E ring.
+      vel.assign(dir.mul(h3.mul(0.26).add(0.32)));
       life.assign(h1.mul(5.0).add(5.0));
     });
 
@@ -108,9 +119,13 @@ export function createEnceladusPlumes(count = 262144): PlumeSystem {
 
   const alt = pos.length().sub(1.0);
   const disc = smoothstep(0.5, 0.06, uv().sub(0.5).length());
-  // Forward scattering: icy grains glow against the light.
-  const V = normalize(cameraPosition.sub(pos)); // local ≈ world dir at these scales
-  const fwd = pow(clamp(dot(V, sunDirUniform).negate(), 0, 1), 3).mul(2.4).add(0.18);
+  // Forward scattering: icy grains glow against the light. Both vectors in
+  // the moon's LOCAL frame (particle positions are local; the camera and
+  // sun direction must be transformed in).
+  const camLocal = modelWorldMatrixInverse.mul(vec4(cameraPosition, 1)).xyz;
+  const sunLocal = normalize(modelWorldMatrixInverse.mul(vec4(sunDirUniform, 0)).xyz);
+  const V = normalize(camLocal.sub(pos));
+  const fwd = pow(clamp(dot(V, sunLocal).negate(), 0, 1), 3).mul(2.4).add(0.18);
 
   const visible = smoothstep(0.0, 0.15, life); // hidden while life < 0
   material.opacityNode = disc

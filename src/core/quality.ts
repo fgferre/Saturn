@@ -67,7 +67,11 @@ export function setQuality(name: QualityName): void {
   try {
     localStorage.setItem(STORAGE_KEY, name);
     localStorage.setItem(TUNED_KEY, '1'); // manual choice disables auto-tuning
-  } catch { /* ignore */ }
+  } catch {
+    // Storage blocked: the preset can't persist, so reloading would just
+    // destroy the session for a no-op.
+    return;
+  }
   location.reload();
 }
 

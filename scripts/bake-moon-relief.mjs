@@ -97,6 +97,12 @@ function readFloatTiff(path) {
     const read = (idx) => (type === 3 ? buf.readUInt16LE(valOff + idx * 2) : buf.readUInt32LE(valOff + idx * 4));
     tags[tag] = { count, read };
   }
+  // Guard the assumptions this minimal reader makes: uncompressed single
+  // strip-organized float32 samples (both our sources comply).
+  if (tags[259] && tags[259].read(0) !== 1) throw new Error('compressed TIFF unsupported');
+  if (tags[258] && tags[258].read(0) !== 32) throw new Error('expected 32-bit samples');
+  if (tags[339] && tags[339].read(0) !== 3) throw new Error('expected float samples');
+
   const width = tags[256].read(0);
   const height = tags[257].read(0);
   const rowsPerStrip = tags[278] ? tags[278].read(0) : height;
@@ -172,6 +178,21 @@ async function readShapeModel(path, hasIndexColumn, W, H) {
     }
     for (let i = 0; i < W * H; i++) if (filled[i] === 2) filled[i] = 1;
     if (!holes) break;
+  }
+  // Fully empty polar rows deadlock the >=2-neighbor rule (their horizontal
+  // neighbors are equally empty) — propagate the nearest filled row into any
+  // remaining holes.
+  for (let yPix = 0; yPix < H; yPix++) {
+    for (let xPix = 0; xPix < W; xPix++) {
+      const i = yPix * W + xPix;
+      if (filled[i]) continue;
+      for (let d = 1; d < H; d++) {
+        const below = yPix + d, above = yPix - d;
+        if (below < H && filled[below * W + xPix]) { grid[i] = grid[below * W + xPix]; break; }
+        if (above >= 0 && filled[above * W + xPix]) { grid[i] = grid[above * W + xPix]; break; }
+      }
+      filled[i] = 1;
+    }
   }
   return { grid, meanR };
 }

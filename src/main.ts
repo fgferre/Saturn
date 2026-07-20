@@ -83,6 +83,7 @@ async function boot(): Promise<void> {
     active: false,
     timer: 0,
     stop: 0,
+    wasDrifting: false,
     stops: ['saturn', 'enceladus', 'titan', 'mimas', 'iapetus', 'saturn'],
     exitEl: (() => {
       const el = document.createElement('div');
@@ -95,6 +96,7 @@ async function boot(): Promise<void> {
       this.active = true;
       this.timer = 0;
       this.stop = 0;
+      this.wasDrifting = controls.controls.autoRotate;
       document.body.classList.add('cinema');
       controls.controls.autoRotate = true;
       controls.controls.autoRotateSpeed = 0.25;
@@ -104,7 +106,9 @@ async function boot(): Promise<void> {
       if (!this.active) return;
       this.active = false;
       document.body.classList.remove('cinema');
-      controls.controls.autoRotate = false;
+      // Restore the pre-cinema drift state so the HUD checkbox stays truthful.
+      controls.controls.autoRotate = this.wasDrifting;
+      controls.controls.autoRotateSpeed = 0.12;
     },
     update(dt: number) {
       if (!this.active) return;
@@ -148,10 +152,12 @@ async function boot(): Promise<void> {
     if (quality.dof) {
       const focusDist = camera.position.distanceTo(controls.controls.target);
       engine.dofFocus.value = focusDist;
-      // Hyperfocal at planetary distances (1/f² falloff): wide framings stay
-      // pin-sharp; only close fly-bys (< ~10 units) get shallow focus.
+      // The DOF node's blur grows linearly with |distance - focus| up to
+      // maxblur, so ANY nonzero aperture eventually blurs the far field
+      // (stars). True hyperfocal: aperture is exactly 0 except on close
+      // fly-bys, where shallow focus is the cinematic point.
       const f = Math.max(focusDist, 2);
-      engine.dofAperture.value = Math.min(0.01, 0.05 / (f * f));
+      engine.dofAperture.value = f < 25 ? Math.min(0.01, 0.05 / (f * f)) : 0;
     }
 
     // Auto-tune: after ~4 s of real rendering, step down once if needed.

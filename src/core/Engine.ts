@@ -49,6 +49,12 @@ export class Engine {
     const bloomPass = bloom(scenePass, 0.45, 0.35, 0.82);
     let comp: ShaderNodeObject<Node> = scenePass.add(bloomPass);
 
+    // Depth of field on scene+bloom only — lens-internal artifacts (streaks,
+    // ghosts) form after defocus and must not be depth-blurred.
+    if (quality.dof) {
+      comp = dof(comp, scenePass.getViewZNode(), this.dofFocus, this.dofAperture, float(0.008));
+    }
+
     // Physical lens system driven by the HDR sun disk, gated by how visible
     // the sun actually is (CPU occlusion test -> sunVisibilityUniform).
     if (quality.anamorphic) {
@@ -61,11 +67,6 @@ export class Engine {
         lensflare(bloomPass, { threshold: float(2.6), ghostSamples: float(3) })
           .mul(sunVisibilityUniform).mul(0.35),
       );
-    }
-
-    // Depth of field focused on the tracked body (uniforms fed per frame).
-    if (quality.dof) {
-      comp = dof(comp, scenePass.getViewZNode(), this.dofFocus, this.dofAperture, float(0.008));
     }
 
     // Cinematic finish: subtle chromatic fringing at the frame edges,

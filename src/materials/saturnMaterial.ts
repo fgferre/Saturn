@@ -24,7 +24,7 @@ type NodeObj = ShaderNodeObject<Node>;
 /** Procedural banding — the fallback when no real map is available. */
 function proceduralBands(bandUv: NodeObj): NodeObj {
   const u = bandUv.x;
-  const v = bandUv.y; // 0 at north pole, 1 at south pole (three.js spheres)
+  const v = bandUv.y; // three.js spheres: 0 at the SOUTH pole, 1 at the north
   const latAbs = abs(v.sub(0.5)).mul(2); // 0 equator .. 1 poles
 
   // Slight longitudinal wobble so band edges are not perfect circles.
@@ -146,7 +146,9 @@ export function createSaturnMaterial(
 
   // --- Ringshine: the rings light the night side (LUT by latitude) ---
   if (ringshineTex) {
-    const latU = oneMinus(uv().y); // LUT: u=0 south pole .. u=1 north pole
+    // LUT: u=0 south .. u=1 north; three's SphereGeometry has uv.y=0 at the
+    // SOUTH pole, so the coordinate maps straight through.
+    const latU = uv().y;
     const shine = texture(ringshineTex, vec2(latU, 0.5)).r;
     // Strongest where the sun doesn't reach; fades out on the day side.
     const night = oneMinus(clamp(positionWorld.normalize().dot(S).mul(2.5).add(0.5), 0, 1));

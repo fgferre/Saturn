@@ -13,7 +13,7 @@ import { AdditiveBlending, DoubleSide, Mesh, PlaneGeometry } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   cameraPosition, clamp, cos, dot, float, mix, mx_noise_float, normalize,
-  oneMinus, positionLocal, positionWorld, pow, sin, uv, vec3,
+  oneMinus, positionWorld, pow, sin, uv, vec3,
 } from 'three/tsl';
 import { spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
 import { KM_PER_UNIT } from '../data/saturn.ts';
@@ -46,7 +46,7 @@ export function createFRing(): Mesh[] {
     ).mul(0.10);
     const ecc = cos(theta.add(si * 2.1)).mul(0.04);
     const r = float(baseR).add(kink).add(ecc)
-      .add(positionLocal.y.mul(width * 8)); // v across the strand
+      .add(uv().y.sub(0.5).mul(width * 8)); // v across the strand
     const bent = vec3(r.mul(cos(theta)), 0.0, r.mul(sin(theta)).negate());
     material.positionNode = bent;
 
@@ -55,8 +55,10 @@ export function createFRing(): Mesh[] {
       vec3(cos(theta).mul(14).add(si * 3.1), sin(theta).mul(14), spokePhaseUniform.mul(0.3)),
       1.0,
     ).mul(0.5).add(0.5);
-    // Across-strand gaussian profile.
-    const across = pow(oneMinus(clamp(positionLocal.y.abs().mul(2), 0, 1)), 2);
+    // Across-strand gaussian profile — from uv, NOT positionLocal: with a
+    // positionNode override, fragment-stage positionLocal reads the bent
+    // position (whose y is literally 0), never the original attribute.
+    const across = pow(oneMinus(clamp(uv().y.sub(0.5).abs().mul(2), 0, 1)), 2);
 
     // Forward-scattering phase: bright backlit, dim frontlit.
     const V = normalize(cameraPosition.sub(positionWorld));
