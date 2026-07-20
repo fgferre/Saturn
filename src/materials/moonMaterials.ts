@@ -8,15 +8,17 @@
  * the mesh), so features stay put under tidal-locking rotation.
  */
 
-import { Texture, Vector3 } from 'three';
+import { Texture, Vector2, Vector3 } from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
 import {
-  abs, cameraPosition, clamp, dot, mix, mul, mx_fractal_noise_float,
+  abs, cameraPosition, clamp, dot, float, mix, mul, mx_fractal_noise_float,
   mx_noise_float, mx_worley_noise_float, normalize, normalWorld, oneMinus,
   positionLocal, positionWorld, pow, sin, smoothstep, texture, vec3,
 } from 'three/tsl';
 import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
+import { MoonNodeMaterial, type HapkeParams } from './hapke.ts';
+import type { MoonRelief } from './textures.ts';
 
 type NodeObj = ShaderNodeObject<Node>;
 
@@ -177,16 +179,25 @@ function saturnshine(): NodeObj {
   return vec3(1.0, 0.93, 0.75).mul(facing.mul(apparent)) as unknown as NodeObj;
 }
 
+/** Per-moon Hapke photometry tweaks (icier = brighter surge). */
+const HAPKE_TUNING: Record<string, Partial<HapkeParams>> = {
+  enceladus: { surgeAmplitude: 1.3, g: -0.35 },
+  mimas: { surgeAmplitude: 1.0 },
+  tethys: { surgeAmplitude: 1.0 },
+  iapetus: { surgeAmplitude: 0.6, g: -0.2 },
+};
+
 export function createMoonMaterial(
   id: string,
   map?: Texture | null,
   eclipseLight?: Node,
+  relief?: MoonRelief | null,
 ): MeshStandardNodeMaterial {
   // Real Cassini mosaic when available (Titan keeps its haze material and
   // Hyperion its sponge — their looks aren't well served by an albedo map).
   let m: MeshStandardNodeMaterial;
   if (map && id !== 'titan' && id !== 'hyperion') {
-    m = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
+    m = new MoonNodeMaterial(HAPKE_TUNING[id]);
     const grade = MAP_GRADING[id] ?? { desat: 0.3, gain: 1.0 };
     // No explicit uvNode: passing one would bypass the texture matrix and
     // drop the offset.x=0.5 longitude alignment (three r178 TextureNode).
@@ -200,9 +211,21 @@ export function createMoonMaterial(
       mix(mapCol, vec3(lum, lum, lum), grade.desat).mul(grade.gain).mul(detail),
       0, 1,
     );
-    // Grazing-light relief from the albedo map (no height data needed).
-    m.bumpMap = map;
-    m.bumpScale = 0.02;
+
+    if (relief) {
+      // Real (or documented-synthetic) topography: radial displacement in the
+      // vertex stage + physically scaled normal map. `.level(0)` keeps the
+      // sample valid in the vertex stage on both backends.
+      const h = texture(relief.height).level(float(0)).r;
+      const radial = h.mul(relief.scale).add(1 + relief.bias);
+      m.positionNode = positionLocal.mul(radial);
+      m.normalMap = relief.normal;
+      m.normalScale = new Vector2(1.2, 1.2);
+    } else {
+      // Grazing-light relief faked from the albedo map.
+      m.bumpMap = map;
+      m.bumpScale = 0.02;
+    }
   } else {
     const builder = BUILDERS[id];
     m = builder ? builder() : makeMoonMaterial(icyBase([0.7, 0.7, 0.68], 5, 0.25));

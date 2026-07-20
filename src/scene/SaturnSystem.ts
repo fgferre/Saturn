@@ -102,7 +102,8 @@ export class SaturnSystem {
   readonly ringProfile: RingProfile;
   private readonly ringshine: Ringshine;
   private readonly orbitLines: Line[] = [];
-  private readonly moonGeometry = new SphereGeometry(1, 96, 48);
+  // High tessellation: real displacement needs vertices (limb silhouettes).
+  private readonly moonGeometry = new SphereGeometry(1, 192, 96);
 
   constructor(maps?: BodyMaps) {
     this.ringProfile = createRingProfile(maps?.ringProfile);
@@ -177,7 +178,9 @@ export class SaturnSystem {
         ? new Mesh(hyperionGeometry(), createMoonMaterial(def.id, null, eclipseLight))
         : new Mesh(
             this.moonGeometry,
-            createMoonMaterial(def.id, maps?.moons.get(def.id), eclipseLight),
+            createMoonMaterial(
+              def.id, maps?.moons.get(def.id), eclipseLight, maps?.relief.get(def.id),
+            ),
           );
       mesh.scale.setScalar(radius);
 
