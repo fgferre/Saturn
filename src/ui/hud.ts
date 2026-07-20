@@ -11,6 +11,7 @@ export interface HudCallbacks {
   onToggleOrbits(v: boolean): void;
   onToggleLabels(v: boolean): void;
   onToggleDrift(v: boolean): void;
+  onExposure(v: number): void;
 }
 
 const SPEEDS: { label: string; value: number }[] = [
@@ -106,6 +107,10 @@ export class Hud {
         <label><input type="checkbox" data-t="orbits">Orbits</label>
         <label><input type="checkbox" checked data-t="labels">Labels</label>
         <label><input type="checkbox" data-t="drift">Drift</label>
+      </div>
+      <div class="hud-exposure">
+        <span>EV</span>
+        <input type="range" min="0.5" max="2.6" step="0.05" value="1.4" data-t="exposure">
       </div>`;
     hud.appendChild(info);
     this.infoName = info.querySelector('h2')!;
@@ -117,6 +122,8 @@ export class Hud {
       .addEventListener('change', (e) => cb.onToggleLabels((e.target as HTMLInputElement).checked));
     info.querySelector<HTMLInputElement>('input[data-t="drift"]')!
       .addEventListener('change', (e) => cb.onToggleDrift((e.target as HTMLInputElement).checked));
+    info.querySelector<HTMLInputElement>('input[data-t="exposure"]')!
+      .addEventListener('input', (e) => cb.onExposure(Number((e.target as HTMLInputElement).value)));
   }
 
   setFocused(id: string): void {

@@ -9,6 +9,9 @@ import { PostProcessing, WebGPURenderer } from 'three/webgpu';
 import { float, oneMinus, pass, screenUV } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
+import { anamorphic } from 'three/addons/tsl/display/AnamorphicNode.js';
+import { lensflare } from 'three/addons/tsl/display/LensflareNode.js';
+import { sunVisibilityUniform } from '../materials/sharedUniforms.ts';
 
 export class Engine {
   readonly renderer: WebGPURenderer;
@@ -36,10 +39,20 @@ export class Engine {
     // MSAA on the scene pass only — the final fullscreen quad doesn't need it.
     const scenePass = pass(this.scene, this.camera, { samples: 4 });
     const bloomPass = bloom(scenePass, 0.45, 0.35, 0.82);
+    // Physical lens system driven by the HDR sun disk: anamorphic streak +
+    // ghost flares, both gated by how visible the sun actually is (CPU
+    // occlusion test updates sunVisibilityUniform each frame).
+    const streak = anamorphic(scenePass, float(3.0), float(4), 24)
+      .mul(sunVisibilityUniform).mul(0.12);
+    const ghosts = lensflare(bloomPass, { threshold: float(1.5), ghostSamples: float(3) })
+      .mul(sunVisibilityUniform).mul(0.35);
     // Cinematic finish: gentle vignette + fine animated film grain.
     const vignette = oneMinus(screenUV.sub(0.5).length().pow(2.2).mul(0.5));
     this.post = new PostProcessing(renderer);
-    this.post.outputNode = film(scenePass.add(bloomPass).mul(vignette), float(0.035));
+    this.post.outputNode = film(
+      scenePass.add(bloomPass).add(streak).add(ghosts).mul(vignette),
+      float(0.035),
+    );
 
     this.backendName = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
       ? 'WebGPU'

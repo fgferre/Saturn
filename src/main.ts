@@ -9,7 +9,8 @@ import { Sun } from './scene/Sun.ts';
 import { loadAllMaps } from './materials/textures.ts';
 import { FocusControls } from './camera/FocusControls.ts';
 import { sunDirectionAt } from './data/sunDirection.ts';
-import { sunDirUniform } from './materials/sharedUniforms.ts';
+import { sunDirUniform, sunVisibilityUniform } from './materials/sharedUniforms.ts';
+import { saturnShadowOnMoon } from './physics/eclipse.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
 import { Hud } from './ui/hud.ts';
 import { BodyLabels } from './ui/labels.ts';
@@ -64,6 +65,7 @@ async function boot(): Promise<void> {
       controls.controls.autoRotate = v;
       controls.controls.autoRotateSpeed = 0.12;
     },
+    onExposure: (v) => { engine.renderer.toneMappingExposure = v; },
   });
   const labels = new BodyLabels(allBodies, focusBody);
   hud.setFocused('saturn');
@@ -84,6 +86,12 @@ async function boot(): Promise<void> {
     system.update(clock.jd, sunDir);
     controls.update(dt);
     labels.update(camera, getPos, controls.focusId);
+
+    // Lens flare gating: how much of the sun does the camera actually see?
+    // (Same occlusion math as moon eclipses: Saturn's ellipsoid + ring alpha.)
+    sunVisibilityUniform.value = saturnShadowOnMoon(
+      camera.position, sunDir, system.ringProfile.opacityAt,
+    );
 
     hud.setDate(clock.date);
     // Refresh camera-distance stat cheaply (twice a second with the FPS meter).

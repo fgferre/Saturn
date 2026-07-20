@@ -19,9 +19,11 @@ import { createRingsMaterial } from '../materials/ringsMaterial.ts';
 import { createSaturnMaterial } from '../materials/saturnMaterial.ts';
 import { createMoonMaterial } from '../materials/moonMaterials.ts';
 import { createAtmosphereShell } from '../materials/atmospheres.ts';
+import { createRaymarchedAtmosphere } from '../materials/raymarchAtmosphere.ts';
 import { createEnceladusPlumes } from '../effects/plumes.ts';
-import { moonShadowUniforms, spokePhaseUniform } from '../materials/sharedUniforms.ts';
+import { cloudPhaseUniform, moonShadowUniforms, spokePhaseUniform } from '../materials/sharedUniforms.ts';
 import { saturnShadowOnMoon } from '../physics/eclipse.ts';
+import { Ringshine } from '../physics/ringshine.ts';
 import { fbm3D } from '../utils/noise.ts';
 
 export interface SystemBody {
@@ -91,16 +93,18 @@ export class SaturnSystem {
   readonly group = new Group();
   readonly bodies = new Map<string, SystemBody>();
   readonly ringProfile: RingProfile;
+  private readonly ringshine: Ringshine;
   private readonly orbitLines: Line[] = [];
   private readonly moonGeometry = new SphereGeometry(1, 96, 48);
 
   constructor(maps?: BodyMaps) {
     this.ringProfile = createRingProfile(maps?.ringProfile);
+    this.ringshine = new Ringshine(maps?.ringProfile ?? null, maps?.ringScatter ?? null);
 
     // --- Saturn ---
     const saturnMesh = new Mesh(
       new SphereGeometry(toUnits(SATURN.physical.radiusKm), 128, 64),
-      createSaturnMaterial(this.ringProfile, maps?.saturn),
+      createSaturnMaterial(this.ringProfile, maps?.saturn, this.ringshine.texture),
     );
     const squash = (SATURN.physical.polarRadiusKm ?? SATURN.physical.radiusKm) / SATURN.physical.radiusKm;
     saturnMesh.scale.y = squash;
@@ -109,13 +113,21 @@ export class SaturnSystem {
     this.group.add(saturnAnchor);
     this.bodies.set(SATURN.id, { def: SATURN, anchor: saturnAnchor, mesh: saturnMesh });
 
-    // Saturn limb glow.
-    saturnAnchor.add(createAtmosphereShell(toUnits(SATURN.physical.radiusKm), {
-      color: [0.95, 0.82, 0.55],
-      scale: 1.014,
-      rimPower: 4.0,
-      intensity: 0.55,
-    }, squash));
+    // Raymarched limb/terminator atmosphere (replaces the fresnel shell).
+    const requ = toUnits(SATURN.physical.radiusKm);
+    saturnAnchor.add(createRaymarchedAtmosphere({
+      bodyRadius: requ,
+      shellRadius: requ * 1.025,
+      scaleHeight: 0.006,
+      // Saturn's visible haze is warm amber (ammonia aerosols), only a
+      // faint blue Rayleigh component.
+      rayleigh: [0.30, 0.26, 0.28],
+      mie: 1.5,
+      mieG: 0.72,
+      intensity: 3.5,
+      steps: 16,
+      ySquash: squash,
+    }));
 
     // --- Rings ---
     // No fixed renderOrder on the transparent set (rings/shells/plumes):
@@ -183,6 +195,12 @@ export class SaturnSystem {
 
     // B-ring spokes corotate with the magnetosphere (~System III rate).
     spokePhaseUniform.value = -(((jd * 24) / 10.66) * Math.PI * 2) % (Math.PI * 2);
+
+    // Cloud advection: equatorial jet laps the planet in ~9.75 days.
+    // Wrapped every 10 laps to keep f32 precision (rare, brief reset).
+    cloudPhaseUniform.value = (jd % 97.5) / 9.75;
+
+    if (sunDir) this.ringshine.update(sunDir);
 
     let slot = 0;
     for (const def of MOONS) {

@@ -19,3 +19,9 @@ export const moonShadowUniforms = Array.from(
 
 /** Rotation phase of the B-ring spoke pattern (corotates with the magnetosphere). */
 export const spokePhaseUniform = uniform(0);
+
+/** Cloud-advection phase for Saturn's zonal jets (sim-time driven, wraps). */
+export const cloudPhaseUniform = uniform(0);
+
+/** 0..1 — how much of the solar disk the camera can see (drives lens flare). */
+export const sunVisibilityUniform = uniform(1);

@@ -168,6 +168,16 @@
 }
 .hud-toggles input { accent-color: var(--accent); }
 
+.hud-exposure {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--hud-dim);
+}
+.hud-exposure input { flex: 1; accent-color: var(--accent); height: 14px; }
+
 /* Body labels over the 3D view */
 .body-label {
   all: unset;
