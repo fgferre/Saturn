@@ -9,6 +9,8 @@ WebGL2 fallback) via Three.js + TSL node materials.
 
 ![stack](https://img.shields.io/badge/three.js-r178-blue) ![stack](https://img.shields.io/badge/WebGPU-TSL-orange) ![stack](https://img.shields.io/badge/TypeScript-strict-blue)
 
+**Live: [fgferre.github.io/Saturn](https://fgferre.github.io/Saturn/)**
+
 ## Running
 
 ```bash
@@ -16,6 +18,7 @@ npm install
 npm run dev      # dev server
 npm run build    # type-check + production build
 npm run check    # orbital-math self-test (pure Node, no browser)
+npm run deploy   # build + push dist to the gh-pages branch (GitHub Pages)
 ```
 
 Append `?webgl` to the URL to force the WebGL2 backend.
