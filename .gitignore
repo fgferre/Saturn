@@ -1,3 +1,6 @@
 node_modules/
 dist/
 shot.jpg
+
+# Actions workflow needs the 'workflow' OAuth scope to push; deploy is branch-based for now
+.github/workflows/
