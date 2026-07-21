@@ -256,17 +256,68 @@
 .hud-photo:hover, .hud-share:hover { color: var(--hud-text); border-color: rgba(255,255,255,0.25); }
 .hud-photo:disabled { opacity: 0.5; cursor: default; }
 
-/* Events panel — bottom right. Scrollable one-off list + live apoapsis row. */
-.hud-events {
+/* Bottom-right column: Postcards gallery stacked above the Events panel. */
+.hud-right {
   position: absolute;
   right: 16px;
   bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-height: calc(100vh - 210px);
+}
+
+/* Events panel — scrollable one-off list + live apoapsis row. */
+.hud-events {
   width: 232px;
+  min-height: 0; /* allow the scroll area to shrink inside the flex column */
   max-height: 44vh;
   display: flex;
   flex-direction: column;
   padding: 10px 8px 8px;
 }
+
+/* Postcards gallery (F12.1c) — curated one-click views, above the events. */
+.hud-postcards {
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px 8px;
+}
+.hud-postcards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.hud-postcard {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.hud-postcard:hover { background: rgba(255,255,255,0.06); }
+.hud-postcard:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.hud-postcard .pc-name {
+  color: var(--hud-text);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-postcard .pc-caption {
+  color: var(--hud-dim);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-postcard:hover .pc-name { color: var(--accent); }
 .hud-events-title {
   padding: 0 6px 6px;
   font-size: 9.5px;
@@ -448,9 +499,9 @@ body.cinema .cinema-exit { opacity: 1; }
 .body-label.hidden { display: none; }
 
 @media (max-width: 720px) {
-  /* Events stay hidden on the narrow layout; the body list keeps clear of the
-     bottom sheet. */
-  .hud-events { display: none; }
+  /* Events + Postcards stay hidden on the narrow layout; the body list keeps
+     clear of the bottom sheet. */
+  .hud-right { display: none; }
   .hud-bodies { max-height: 40vh; }
 
   /* F12.2 — the info panel becomes a bottom sheet instead of vanishing. It docks

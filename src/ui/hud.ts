@@ -43,6 +43,14 @@ export interface BodyGroup {
   bodies: BodyDefinition[];
 }
 
+/** A curated view in the Postcards gallery (F12.1c) — display only. */
+export interface PostcardCard {
+  /** Short title, e.g. "The Day the Earth Smiled". */
+  name: string;
+  /** One-line subtitle (subject / date / PIA reference). */
+  caption: string;
+}
+
 /** Live, camera-relative readouts refreshed a couple times a second. */
 export interface LiveInfo {
   distanceKm?: number;
@@ -128,6 +136,7 @@ export class Hud {
   private readonly infoStats: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly eventsListEl: HTMLElement;
+  private readonly postcardsListEl: HTMLElement;
   /** The recurring "next apoapsis" row, refreshed as sim time advances. */
   private apoapsisRow?: HTMLButtonElement;
   private apoapsisEvent?: SaturnEvent;
@@ -417,12 +426,30 @@ export class Hud {
       }
     });
 
-    // Events panel — bottom right. A one-off list built once from the ±5-year
-    // sweep, plus a live "next apoapsis" row that tracks the simulated clock.
+    // Bottom-right column: the Postcards gallery (F12.1c, filled via
+    // setPostcards) stacked above the Events panel. A flex column so both stay
+    // anchored to the corner and neither overlaps the other.
+    const rightStack = document.createElement('div');
+    rightStack.className = 'hud-right';
+    hud.appendChild(rightStack);
+
+    // Postcards gallery — created empty here, populated by setPostcards. Sits at
+    // the top of the stack so the (taller, scrollable) Events panel is below it.
+    const postcards = document.createElement('div');
+    postcards.className = 'panel hud-postcards';
+    postcards.innerHTML =
+      '<div class="hud-events-title">Postcards</div><div class="hud-postcards-list"></div>';
+    rightStack.appendChild(postcards);
+    this.postcardsListEl = postcards.querySelector('.hud-postcards-list')!;
+    // Hidden until setPostcards adds at least one card.
+    postcards.style.display = 'none';
+
+    // Events panel. A one-off list built once from the ±5-year sweep, plus a
+    // live "next apoapsis" row that tracks the simulated clock.
     const events = document.createElement('div');
     events.className = 'panel hud-events';
     events.innerHTML = '<div class="hud-events-title">Events</div><div class="hud-events-list"></div>';
-    hud.appendChild(events);
+    rightStack.appendChild(events);
     this.eventsListEl = events.querySelector('.hud-events-list')!;
 
     // Help overlay ('?' toggles, Esc closes — bindings live in main.ts). Built
@@ -595,6 +622,29 @@ export class Hud {
       this.fillEventRow(row, e);
       this.eventsListEl.appendChild(row);
     }
+  }
+
+  /**
+   * F12.1c — populate the Postcards gallery. Each card is display-only (name +
+   * caption); clicking row `i` calls `onSelect(i)`, and main.ts restores the
+   * matching curated state (focus + date + speed + camera pose) via the same
+   * path as an F8.3 shared link. The panel stays hidden if `cards` is empty.
+   */
+  setPostcards(cards: PostcardCard[], onSelect: (i: number) => void): void {
+    this.postcardsListEl.replaceChildren();
+    cards.forEach((c, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'hud-postcard';
+      btn.innerHTML = '<span class="pc-name"></span><span class="pc-caption"></span>';
+      btn.querySelector('.pc-name')!.textContent = c.name;
+      btn.querySelector('.pc-caption')!.textContent = c.caption;
+      btn.title = c.caption;
+      btn.addEventListener('click', () => onSelect(i));
+      this.postcardsListEl.appendChild(btn);
+    });
+    // Reveal the panel only once it has content (the container hosts the title).
+    const panel = this.postcardsListEl.parentElement;
+    if (panel) panel.style.display = cards.length > 0 ? '' : 'none';
   }
 
   /** Refresh the recurring "next apoapsis" row from the live sim time. */

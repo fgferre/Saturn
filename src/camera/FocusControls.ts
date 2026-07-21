@@ -115,6 +115,27 @@ export class FocusControls {
     this.syncOrbitFromPose();
   }
 
+  /**
+   * Smoothly fly to a body framed at an explicit offset from it (F12.1c
+   * postcards). Like `focus()`, but the destination pose is given rather than
+   * derived from the current view direction, so a curated az/el/dist lands
+   * exactly. The interpolated pose stays authoritative until the flight ends
+   * (same minDistance-deferral as `focus()`), then the internal spherical state
+   * is re-derived so the first follow-frame doesn't jump.
+   */
+  flyTo(id: string, toOffset: Vector3): void {
+    this.flushOrbitMomentum();
+    const radius = this.getBodyRadius(id);
+    const fromOffset = this.camera.position.clone().sub(this.controls.target);
+    this.focusId = id;
+    this.transition = {
+      t: 0, duration: 1.6,
+      fromTarget: this.controls.target.clone(), fromOffset, toOffset: toOffset.clone(),
+      minDistance: Math.max(radius * 1.4, 0.02),
+    };
+    this.controls.enabled = false;
+  }
+
   /** Fly to a body. Re-focusing the current body re-frames it. */
   focus(id: string): void {
     // Drop any pre-focus drag momentum so it cannot freeze across the flight

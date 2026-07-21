@@ -308,6 +308,79 @@ async function boot(): Promise<void> {
   });
   hud.setNextApoapsis(nextEnceladusApoapsis(clock.jd));
 
+  // F12.1c — Postcards. Each card is exactly an F8.3 state tuple (focus, jd,
+  // speed, camera pose); clicking one restores it through the same code path a
+  // shared link uses — set the clock, sync the HUD speed/pause, apply the lens,
+  // then fly the camera to the curated pose. The camera az/el are derived from
+  // the real Sun geometry at each date (backlit / side-lit / top-down) via
+  // sunDirectionAt; distances, FOVs and the fine framing are hand-tuned.
+  // ⚠ VERIFICAR: dates line up with the cited Cassini frames, but the exact
+  //   poses are curated approximations pending a visual pass (§1.4).
+  const postcards: { name: string; caption: string; state: UrlState }[] = [
+    {
+      name: 'The Day the Earth Smiled',
+      caption: 'Saturn eclipsing the Sun · 2013-07-19 · PIA17172',
+      // Camera on the anti-Sun side so Saturn occults the Sun (glare gate), the
+      // framing PIA17172 needs; Earth rides near the Sun in the sky (F12.1b).
+      state: { focus: 'saturn', jd: 2456492.5, speed: 3600, cam: { az: -1.54, el: -0.28, dist: 400, fov: 36 } },
+    },
+    {
+      name: 'Titan crescent',
+      caption: 'Backlit haze · 2012-01-05 · Cassini',
+      // Just off the anti-Sun axis → a thin crescent of scattered light.
+      state: { focus: 'titan', jd: 2455931.5, speed: 3600, cam: { az: -0.95, el: -0.15, dist: 24, fov: 22 } },
+    },
+    {
+      name: 'Hexagon pole',
+      caption: "North pole vortex · 2013-11-27 · PIA14944",
+      // Looking down the lit north pole (northern summer). ⚠ VERIFICAR hexagon.
+      state: { focus: 'saturn', jd: 2456623.5, speed: 3600, cam: { az: 1.53, el: 1.28, dist: 165, fov: 38 } },
+    },
+    {
+      name: 'Enceladus plumes',
+      caption: 'Backlit south-pole jets · 2009-11-21 · PIA11688',
+      // Low Sun behind the moon so the geysers glow (F9.4 gate lets them show).
+      state: { focus: 'enceladus', jd: 2455156.5, speed: 3600, cam: { az: -0.83, el: -0.08, dist: 4.2, fov: 30 } },
+    },
+    {
+      name: 'Iapetus two-tone',
+      caption: 'Dark/bright dichotomy · 2007-09-10 · PIA08384',
+      // Side-lit (~90° phase) so both the dark leading and bright trailing
+      // hemispheres are visible in one frame.
+      state: { focus: 'iapetus', jd: 2454353.5, speed: 3600, cam: { az: 1.18, el: 0.12, dist: 9, fov: 24 } },
+    },
+    {
+      name: 'Daphnis waves',
+      caption: 'Keeler-gap edge waves · 2017-01-16 · PIA21056',
+      // Grazing view along the ring plane; a little sim speed lets the waves
+      // travel with the moon (F11.2). Post-Onda-8 subject.
+      state: { focus: 'daphnis', jd: 2457769.5, speed: 60, cam: { az: 2.44, el: 0.05, dist: 0.9, fov: 30 } },
+    },
+  ];
+  const applyPostcard = (s: UrlState): void => {
+    if (s.jd !== undefined) clock.jd = s.jd;
+    if (s.speed !== undefined) { clock.speed = s.speed; hud.setSpeed(s.speed); }
+    clock.paused = false;
+    hud.setPaused(false);
+    if (s.cam?.fov !== undefined) { applyFov(s.cam.fov); hud.setFov(camera.fov); }
+    if (s.focus !== undefined && byId.has(s.focus)) {
+      const id = s.focus;
+      if (s.cam) {
+        const [ox, oy, oz] = sphericalToOffset(s.cam.az, s.cam.el, s.cam.dist);
+        controls.flyTo(id, urlBodyScratch.set(ox, oy, oz));
+      } else {
+        controls.focus(id);
+      }
+      hud.setFocused(id);
+      hud.setInfo(byId.get(id)!);
+    }
+    scheduleUrlWrite();
+  };
+  hud.setPostcards(
+    postcards.map((p) => ({ name: p.name, caption: p.caption })),
+    (i) => applyPostcard(postcards[i].state),
+  );
+
   // F8.3 — apply the restored focus, camera pose and speed now that the
   // controls/HUD exist. Unknown ids fall through to the default framing.
   if (initialUrl.speed !== undefined) hud.setSpeed(clock.speed);
