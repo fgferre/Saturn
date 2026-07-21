@@ -23,7 +23,7 @@ import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
 import { Hud, SPEED_VALUES } from './ui/hud.ts';
 import { BodyLabels, occludedBySaturn } from './ui/labels.ts';
 import { Cinema } from './ui/cinema.ts';
-import { autoTuneDown, quality, setBeforeReload } from './core/quality.ts';
+import { autoTuneDown, quality, setBeforeReload, tuneDisabled } from './core/quality.ts';
 import {
   FOV_DEFAULT, FOV_MAX, FOV_MIN,
   offsetToSpherical, parseState, serializeState, sphericalToOffset,
@@ -412,10 +412,33 @@ async function boot(): Promise<void> {
   const SUN_VIS_HALF_LIFE = 0.1;
   let fpsAccum = 0;
   let fpsFrames = 0;
-  // One-shot auto-tuner: measure the first seconds, step down if struggling.
+  // One-shot auto-tuner: measure the first second, drop a whole preset once if
+  // the machine can't even hold ~30 fps (F10.3 fallback below the dynamic band).
   let tuneAccum = 0;
   let tuneFrames = 0;
   let tuned = false;
+
+  // F10.3 — dynamic resolution. Nudge renderer.setPixelRatio toward the 55–60
+  // fps band in QUANTIZED steps (each setPixelRatio reallocates the PassNode
+  // RTs = a hitch, so steps are coarse and rare). A move needs TWO consecutive
+  // 1 s windows on the same side of the band; the controller is PAUSED while the
+  // tab is hidden or a capture holds the loop (never react to frozen/off-screen
+  // frames). ?notune disables it. The effective DPR shows in the HUD.
+  const DPR_STEPS = [0.75, 1.0, 1.25, 1.5, 2.0].filter((s) => s <= quality.dprCap + 1e-6);
+  let dprIndex = 0;
+  { // start from the nearest quantized step to the engine's current DPR
+    const cur = engine.renderer.getPixelRatio();
+    let bestD = Infinity;
+    for (let i = 0; i < DPR_STEPS.length; i++) {
+      const d = Math.abs(DPR_STEPS[i] - cur);
+      if (d < bestD) { bestD = d; dprIndex = i; }
+    }
+  }
+  let dynAccum = 0;
+  let dynFrames = 0;
+  let belowStreak = 0; // consecutive 1 s windows under the band (fps < 55)
+  let aboveStreak = 0; // consecutive 1 s windows over the band (fps > 60)
+  hud.setDpr(DPR_STEPS[dprIndex]);
 
   const frame = (dt: number): void => {
     clock.update(dt);
@@ -479,13 +502,48 @@ async function boot(): Promise<void> {
       engine.dofAperture.value = f < 25 ? Math.min(0.01, 0.05 / (f * f)) : 0;
     }
 
-    // Auto-tune: after ~4 s of real rendering, step down once if needed.
+    // F10.3 fallback: after the first second, drop a whole preset once if the
+    // machine can't even hold ~30 fps. Above that the dynamic controller (below)
+    // takes over with smooth, reload-free DPR steps.
     if (!tuned) {
       tuneAccum += dt;
       tuneFrames++;
-      if (tuneAccum > 4) {
+      if (tuneAccum > 1) {
         tuned = true;
         autoTuneDown(tuneFrames / tuneAccum);
+      }
+    }
+
+    // F10.3 dynamic resolution controller. Skip while ?notune, or while frozen
+    // (hidden tab / capture) — sampling those would act on unrepresentative or
+    // static frame times and oscillate DPR (RT reallocs) during a photo.
+    if (!tuned) {
+      // First second belongs to the one-shot fallback; don't sample yet.
+      dynAccum = 0;
+      dynFrames = 0;
+    } else if (tuneDisabled || document.hidden || engine.isCapturing) {
+      dynAccum = 0;
+      dynFrames = 0;
+    } else {
+      dynAccum += dt;
+      dynFrames++;
+      if (dynAccum >= 1) {
+        const winFps = dynFrames / dynAccum;
+        dynAccum = 0;
+        dynFrames = 0;
+        if (winFps < 55) { belowStreak++; aboveStreak = 0; }
+        else if (winFps > 60) { aboveStreak++; belowStreak = 0; }
+        else { belowStreak = 0; aboveStreak = 0; }
+        let next = dprIndex;
+        if (belowStreak >= 2 && dprIndex > 0) { next = dprIndex - 1; belowStreak = 0; }
+        else if (aboveStreak >= 2 && dprIndex < DPR_STEPS.length - 1) {
+          next = dprIndex + 1; aboveStreak = 0;
+        }
+        if (next !== dprIndex) {
+          dprIndex = next;
+          engine.renderer.setPixelRatio(DPR_STEPS[dprIndex]);
+          hud.setDpr(DPR_STEPS[dprIndex]);
+        }
       }
     }
 

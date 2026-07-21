@@ -90,10 +90,11 @@ export function setQuality(name: QualityName): void {
 }
 
 /**
- * QA: ?notune disables the auto-tuner — it can location.reload() in the
- * middle of a headless capture run.
+ * QA: ?notune disables all automatic tuning — the one-shot downgrade below
+ * (it can location.reload() mid headless-capture) AND the F10.3 dynamic
+ * resolution controller in main.ts, which reads this via `tuneDisabled`.
  */
-const tuneDisabled = (() => {
+export const tuneDisabled = (() => {
   try {
     return new URLSearchParams(location.search).has('notune');
   } catch {
@@ -102,8 +103,11 @@ const tuneDisabled = (() => {
 })();
 
 /**
- * One-shot downgrade if the machine clearly can't hold the default preset.
- * Call with measured fps after a few seconds of rendering.
+ * One-shot preset downgrade if the machine clearly can't hold the default
+ * preset. Since F10.3 this is only a first-second fallback for a machine so
+ * slow that even the minimum dynamic DPR won't help (measuredFps < 30 → drop a
+ * whole preset + reload once); the dynamic resolution controller in main.ts
+ * handles everything above that with smooth, reload-free DPR steps.
  */
 export function autoTuneDown(measuredFps: number): void {
   try {

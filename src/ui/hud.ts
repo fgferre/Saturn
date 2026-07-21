@@ -101,6 +101,7 @@ const HINT_KEY = 'saturn.hinted';
 export class Hud {
   private readonly dateEl: HTMLElement;
   private readonly fpsEl: HTMLElement;
+  private readonly dprEl: HTMLElement;
   private readonly infoName: HTMLElement;
   private readonly infoBlurb: HTMLElement;
   private readonly infoStats: HTMLElement;
@@ -131,9 +132,10 @@ export class Hud {
     // Brand.
     const brand = document.createElement('div');
     brand.className = 'panel hud-brand';
-    brand.innerHTML = `<h1>SATURN</h1><div class="sub"><span class="hud-badge">${backend}</span><span class="fps"></span></div>`;
+    brand.innerHTML = `<h1>SATURN</h1><div class="sub"><span class="hud-badge">${backend}</span><span class="fps"></span><span class="dpr" title="Dynamic render resolution (F10.3)"></span></div>`;
     hud.appendChild(brand);
     this.fpsEl = brand.querySelector('.fps')!;
+    this.dprEl = brand.querySelector('.dpr')!;
 
     // Body list.
     const list = document.createElement('div');
@@ -477,5 +479,10 @@ export class Hud {
 
   setFps(fps: number): void {
     this.fpsEl.textContent = `${Math.round(fps)} fps`;
+  }
+
+  /** F10.3 — effective dynamic render-resolution (DPR) readout. */
+  setDpr(dpr: number): void {
+    this.dprEl.textContent = `${dpr.toFixed(2)}×`;
   }
 }

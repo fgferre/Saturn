@@ -209,6 +209,15 @@ export class Engine {
   private readonly computes: { node: object; enabled: boolean }[] = [];
 
   /**
+   * True while capture() holds the frame loop. The dynamic-resolution
+   * controller (F10.3) reads this so it never resizes the drawing buffer
+   * mid-capture (a PassNode RT realloc = black frame / hitch during a shot).
+   */
+  get isCapturing(): boolean {
+    return this.capturing;
+  }
+
+  /**
    * Keep bloom/solar cameras pose-identical to the base camera.
    * Call after the frame's final camera pose is known.
    */
