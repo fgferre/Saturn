@@ -208,7 +208,10 @@ const HAPKE_TUNING: Record<string, Partial<HapkeParams>> = {
 export function createMoonMaterial(
   id: string,
   map?: Texture | null,
-  eclipseLight?: Node,
+  // Direct-sunlight mask: 0..1 scalar or an RGB vec3 (eclipse × atmosphere
+  // tint, so umbral moons redden to copper instead of neutral grey). Both
+  // lighting paths below do lightColor.mul(mask), so either type works.
+  directLightMask?: Node,
   relief?: MoonRelief | null,
 ): MeshStandardNodeMaterial {
   // Real Cassini mosaic when available (Titan keeps its haze material and
@@ -251,12 +254,13 @@ export function createMoonMaterial(
 
   // Eclipse / ring shadow: attenuate *direct* sunlight only (Onda 2).
   // Albedo and saturnshine emissive stay full so night-side planet-glow
-  // remains visible inside Saturn's umbra.
-  if (eclipseLight) {
+  // remains visible inside Saturn's umbra. The mask is an RGB vec3 (F9.6):
+  // reddened penumbral light tints the moon copper in the umbra.
+  if (directLightMask) {
     if (m instanceof MoonNodeMaterial) {
-      m.directLightMask = eclipseLight;
+      m.directLightMask = directLightMask;
     } else if (m instanceof DirectMaskedStandardMaterial) {
-      m.directLightMask = eclipseLight;
+      m.directLightMask = directLightMask;
     }
   }
   // Saturnshine on the planet-facing hemisphere (emissive — not eclipsed).

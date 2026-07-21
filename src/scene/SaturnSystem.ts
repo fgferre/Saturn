@@ -33,7 +33,7 @@ import {
 import { seasonalTilt } from '../data/season.ts';
 import { createFRing } from '../materials/fRing.ts';
 import { createRingSlab } from '../effects/ringSlab.ts';
-import { saturnShadowOnMoon } from '../physics/eclipse.ts';
+import { saturnShadowOnMoon, solarAtmosphereTint } from '../physics/eclipse.ts';
 import { Ringshine } from '../physics/ringshine.ts';
 import { quality } from '../core/quality.ts';
 import { fbm3D } from '../utils/noise.ts';
@@ -46,6 +46,14 @@ export interface SystemBody {
   orbitLine?: Line;
   /** Sunlight fraction reaching this moon (eclipse/ring-shadow), CPU-updated. */
   eclipseLight?: UniformNode<number>;
+  /**
+   * RGB direct-light mask for this moon: eclipseLight (scalar) × the Rayleigh
+   * transmittance of the penumbral ray through Saturn's high atmosphere, so a
+   * moon sliding into the umbra reddens (copper) instead of greying to neutral.
+   * Fed to the material's directLightMask; the scalar `eclipseLight` above is
+   * kept separate for the HUD "Sunlight %" read.
+   */
+  eclipseTint?: UniformNode<Vector3>;
 }
 
 const toUnits = (km: number) => km / KM_PER_UNIT;
@@ -189,12 +197,15 @@ export class SaturnSystem {
     for (const def of MOONS) {
       const radius = toUnits(def.physical.radiusKm);
       const eclipseLight = uniform(1);
+      // Direct-light mask fed to the material: scalar eclipse × atmosphere tint
+      // (reddened penumbral light). Starts at full white (no eclipse).
+      const eclipseTint = uniform(new Vector3(1, 1, 1));
       const mesh = def.id === 'hyperion'
-        ? new Mesh(hyperionGeometry(), createMoonMaterial(def.id, null, eclipseLight))
+        ? new Mesh(hyperionGeometry(), createMoonMaterial(def.id, null, eclipseTint))
         : new Mesh(
             this.moonGeometry,
             createMoonMaterial(
-              def.id, maps?.moons.get(def.id), eclipseLight, maps?.relief.get(def.id),
+              def.id, maps?.moons.get(def.id), eclipseTint, maps?.relief.get(def.id),
             ),
           );
       mesh.scale.setScalar(radius);
@@ -202,7 +213,7 @@ export class SaturnSystem {
       const anchor = new Object3D();
       anchor.add(mesh);
       this.group.add(anchor);
-      this.bodies.set(def.id, { def, anchor, mesh, eclipseLight });
+      this.bodies.set(def.id, { def, anchor, mesh, eclipseLight, eclipseTint });
 
       const line = orbitLine(def);
       line.visible = false; // cinematic default; HUD toggle re-enables
@@ -304,9 +315,18 @@ export class SaturnSystem {
         }
         // ...and darken the moon when it enters Saturn's umbra / ring shadow.
         if (body.eclipseLight) {
-          body.eclipseLight.value = saturnShadowOnMoon(
+          const scalar = saturnShadowOnMoon(
             body.anchor.position, sunDir, this.ringProfile.opacityAt,
           );
+          body.eclipseLight.value = scalar; // scalar kept for the HUD Sunlight %
+          // Penumbral light has grazed Saturn's high atmosphere and arrives
+          // reddened. Tint the direct-light mask so the moon goes copper in the
+          // umbra, never neutral grey. solarAtmosphereTint writes into the
+          // uniform's Vector3 in place (no per-frame allocation).
+          if (body.eclipseTint) {
+            solarAtmosphereTint(body.anchor.position, sunDir, body.eclipseTint.value)
+              .multiplyScalar(scalar);
+          }
         }
       }
     }
