@@ -28,8 +28,9 @@ import { createEnceladusPlumes, type PlumeSystem } from '../effects/plumes.ts';
 import { createERing } from '../effects/eRing.ts';
 import {
   cloudPhaseUniform, edgeOnUniform, moonShadowUniforms, plumeActivityUniform,
-  spokePhaseUniform,
+  seasonalTiltUniform, spokePhaseUniform,
 } from '../materials/sharedUniforms.ts';
+import { seasonalTilt } from '../data/season.ts';
 import { createFRing } from '../materials/fRing.ts';
 import { createRingSlab } from '../effects/ringSlab.ts';
 import { saturnShadowOnMoon } from '../physics/eclipse.ts';
@@ -254,6 +255,10 @@ export class SaturnSystem {
     // Cloud advection: equatorial jet laps the planet in ~9.75 days.
     // Wrapped every 10 laps to keep f32 precision (rare, brief reset).
     cloudPhaseUniform.value = (jd % 97.5) / 9.75;
+
+    // Seasonal hemispheric hue: pure lagged forcing (no in-loop filter, so it
+    // stays correct under time-scrub / reverse). +value blues the north.
+    seasonalTiltUniform.value = seasonalTilt(jd);
 
     // Enceladus' plume brightness swings ~4× over its diurnal tidal cycle,
     // peaking near apoapsis (M=π) as the tiger stripes are pulled open. By

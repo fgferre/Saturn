@@ -40,3 +40,10 @@ export const eRingVisUniform = uniform(1);
  * apoapsis when the tiger stripes are pulled open; multiplies the plume opacity.
  */
 export const plumeActivityUniform = uniform(1);
+
+/**
+ * Signed seasonal forcing (F9.3): +value ⇒ northern hemisphere in winter
+ * (blues), −value ⇒ southern. Magnitude ≈ lagged sub-solar latitude sine
+ * (±0.45). Drives a subtle hemispheric blue albedo grade on Saturn's globe.
+ */
+export const seasonalTiltUniform = uniform(0);

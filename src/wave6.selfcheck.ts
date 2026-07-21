@@ -12,6 +12,9 @@ import {
 } from './data/sunDirection.ts';
 import { MOONS, SATURN_HELIOCENTRIC } from './data/saturn.ts';
 import { meanAnomalyAt } from './orbital/kepler.ts';
+import { SEASONAL_LAG_DAYS, seasonalTilt } from './data/season.ts';
+import { sunDirectionAt } from './data/sunDirection.ts';
+import { dateToJD } from './orbital/types.ts';
 import {
   SUN_DISPLAY_RADIANCE,
   SUN_LIGHT_INTENSITY,
@@ -117,6 +120,62 @@ const plumeActivity = (M: number): number => 0.625 - 0.375 * Math.cos(M);
   assert.ok(
     /plumeActivityUniform\.value\s*=\s*0\.625\s*-\s*0\.375\s*\*\s*Math\.cos/.test(sysSrc),
     'F9.2: SaturnSystem drives the activity from the mean-anomaly formula',
+  );
+}
+
+// --- F9.3 seasonal hemispheric hue: pure lagged forcing (achado) ------------
+const jdOf = (y: number, m = 0, d = 1) => dateToJD(new Date(Date.UTC(y, m, d)));
+{
+  // Purity / determinism: seasonalTilt(jd) depends ONLY on jd. Interleaving
+  // other evaluations (including a reverse-time scrub) must not change it —
+  // this is what a stateful in-loop filter would get wrong.
+  const jd1 = jdOf(2030);
+  const jd2 = jdOf(2010, 5, 15);
+  const a = seasonalTilt(jd1);
+  seasonalTilt(jd2);
+  // Reverse scrub: evaluate at descending dates, as F12.1 time control allows.
+  for (let y = 2035; y >= 2005; y--) seasonalTilt(jdOf(y));
+  const c = seasonalTilt(jd1);
+  assert.near(a, c, 0, 'seasonalTilt is pure: f(jd1) identical regardless of order/state');
+  assert.near(seasonalTilt(jd2), seasonalTilt(jd2), 0, 'seasonalTilt is idempotent');
+
+  // Lag is baked in (evaluate at jd − lag), and the sign is the negated
+  // sub-solar latitude (winter hemisphere blues).
+  const probe = jdOf(2029, 3, 10);
+  assert.near(
+    seasonalTilt(probe),
+    -sunDirectionAt(probe - SEASONAL_LAG_DAYS).y,
+    1e-12,
+    'seasonalTilt = −S.y(jd − lag): lag applied and sign negated',
+  );
+  assert.ok(SEASONAL_LAG_DAYS > 365 && SEASONAL_LAG_DAYS < 2 * 365.25,
+    'seasonal lag is ~1–2 years');
+
+  // Sign correctness against the Cassini record:
+  //  • 2004–05 northern winter → north blue → forcing > 0.
+  assert.ok(seasonalTilt(jdOf(2006)) > 0.05, 'north blue in 2004–05 winter (forcing > 0)');
+  //  • ~2017 northern summer solstice → north golden → forcing < 0.
+  assert.ok(seasonalTilt(jdOf(2019)) < 0, 'north golden near 2017 solstice (forcing < 0)');
+  //  • post-2025 equinox the north heads to winter again → blues (forcing > 0).
+  assert.ok(seasonalTilt(jdOf(2032)) > 0.05, 'north blues again after the 2025 equinox (forcing > 0)');
+
+  // Magnitude stays within the sub-solar latitude band (peaks ≈ sin obliquity).
+  let peak = 0;
+  for (let i = 0; i < 360; i++) peak = Math.max(peak, Math.abs(seasonalTilt(jdOf(2005) + i * 30)));
+  assert.ok(peak > 0.40 && peak < 0.46, 'forcing peaks near sin(26.73°) ≈ 0.45');
+}
+
+// --- contract: seasonalTiltUniform wired into the globe grade + driven -------
+{
+  const matSrc = readFileSync(join(base, 'materials/saturnMaterial.ts'), 'utf8');
+  assert.ok(
+    /seasonalTiltUniform/.test(matSrc) && /seasonalHemisphereTint\s*\(\s*color\s*\)/.test(matSrc),
+    'F9.3: saturnMaterial grades the globe via seasonalTiltUniform',
+  );
+  const sysSrc = readFileSync(join(base, 'scene/SaturnSystem.ts'), 'utf8');
+  assert.ok(
+    /seasonalTiltUniform\.value\s*=\s*seasonalTilt\(\s*jd\s*\)/.test(sysSrc),
+    'F9.3: SaturnSystem drives the forcing from the pure seasonalTilt(jd)',
   );
 }
 

@@ -18,7 +18,7 @@ import {
 } from 'three/tsl';
 import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
-import { cloudPhaseUniform, sunDirUniform } from './sharedUniforms.ts';
+import { cloudPhaseUniform, seasonalTiltUniform, sunDirUniform } from './sharedUniforms.ts';
 import { moonTransitLight } from './moonTransits.ts';
 import type { RingProfile } from './ringProfile.ts';
 import { KM_PER_UNIT } from '../data/saturn.ts';
@@ -91,6 +91,33 @@ function animatedSurface(map: Texture): NodeObj {
   // Grade the Solar System Scope map toward Cassini natural color.
   const lum = mapCol.dot(vec3(0.2126, 0.7152, 0.0722));
   return mix(mapCol, vec3(lum, lum, lum), 0.25).mul(vec3(1.02, 1.0, 0.94)).mul(1.05) as NodeObj;
+}
+
+/**
+ * Seasonal hemispheric hue (F9.3): a subtle cool-blue grade over whichever
+ * hemisphere is in winter, scaled by the lagged seasonal forcing
+ * (seasonalTiltUniform, +value ⇒ north in winter). Cassini saw the north blue
+ * in 2004–05 (winter → Rayleigh, less photochemical haze) and golden by the
+ * 2017 solstice. This is an artistic ALBEDO grade (a multiplicative tint on the
+ * surface color, not a new light), calibrated against PIA21345.
+ */
+function seasonalHemisphereTint(color: NodeObj): NodeObj {
+  const forcing = seasonalTiltUniform;
+  // Forcing magnitude peaks at sin(Saturn obliquity 26.73°) at solstice.
+  const AXIAL = float(0.4499); // ⚠ VERIFICAR: sin(26.73°)
+  const MAX_MIX = float(0.10); // ≤12% — a whisper of blue, never a repaint
+  // Only one hemisphere is in winter at a time (forcing has a single sign).
+  const northWinter = clamp(forcing.div(AXIAL), 0, 1);
+  const southWinter = clamp(forcing.negate().div(AXIAL), 0, 1);
+  // Latitude weight per hemisphere from the local normal's sine-latitude.
+  // south uses sinLat.negate() so both smoothsteps keep edge0<edge1 (WGSL).
+  const sinLat = positionLocal.normalize().y;
+  const northLat = smoothstep(0.05, 0.75, sinLat);
+  const southLat = smoothstep(0.05, 0.75, sinLat.negate());
+  const blueAmt = northLat.mul(northWinter).add(southLat.mul(southWinter)).mul(MAX_MIX);
+  // Cool Rayleigh-blue multiplicative tint (grade of albedo, not luminance).
+  const winterBlue = vec3(0.72, 0.82, 1.0);
+  return mix(color, color.mul(winterBlue), blueAmt) as NodeObj;
 }
 
 /** North-polar hexagon: six-lobed jet contour ringing the polar collar. */
@@ -168,6 +195,7 @@ export function createSaturnMaterial(
   // Animated real map when available, procedural bands otherwise.
   // Albedo is unshadowed — ring shadow / moon transits go to directLightMask.
   let color: NodeObj = map ? animatedSurface(map) : proceduralBands(uv());
+  color = seasonalHemisphereTint(color);
   color = polarHexagon(color);
   material.colorNode = color;
   material.directLightMask = saturnDirectLightMask(profile);
