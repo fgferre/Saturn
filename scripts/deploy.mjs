@@ -13,6 +13,9 @@ const run = (cmd, cwd) => execSync(cmd, { cwd, stdio: 'inherit' });
 
 const remote = execSync('git remote get-url origin').toString().trim();
 
+// Local CI gate (S16/S32): selfchecks are contract — a red check aborts the
+// deploy before any build/push happens.
+run('npm run check');
 run('npm run build');
 writeFileSync('dist/.nojekyll', '');
 if (existsSync('dist/.git')) rmSync('dist/.git', { recursive: true, force: true });

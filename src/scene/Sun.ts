@@ -67,9 +67,6 @@ export const SUN_DISPLAY_RADIANCE = 90;
 export const SUN_SEED_CORE_RADIANCE = 28;
 export const SUN_SEED_SKIRT_RADIANCE = 3.5;
 
-/** @deprecated alias — peak seed energy for selfchecks. */
-export const SUN_SEED_RADIANCE = SUN_SEED_CORE_RADIANCE;
-
 /** UV radius of the physical disk within the padded quad (0.5 / DISK_PAD). */
 export const SUN_DISK_UV_RADIUS = 0.5 / DISK_PAD;
 

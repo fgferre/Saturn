@@ -14,7 +14,7 @@ import {
 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  abs, add, atan2, cameraPosition, clamp, cos, dot, float, fwidth, length,
+  abs, add, atan, cameraPosition, clamp, cos, dot, float, fwidth, length,
   max, mix, mul, mx_fractal_noise_float, normalize, oneMinus, positionWorld,
   pow, sin, smoothstep, texture, uv, vec2, vec3,
 } from 'three/tsl';
@@ -100,7 +100,7 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   // --- B-ring spokes: ghostly radial streaks of levitated dust that corotate
   // with the magnetosphere. Dark in backscattered light, bright when backlit.
   // Seasonal in reality (near-equinox phenomenon — which the mid-2020s are).
-  const rawAng = atan2(P.z, P.x);
+  const rawAng = atan(P.z, P.x);
   const ang = rawAng.add(spokePhaseUniform);
   const rr = uv().x;
   const bMask = smoothstep(0.34, 0.42, rr).mul(smoothstep(0.70, 0.60, rr));

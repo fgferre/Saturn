@@ -1,0 +1,46 @@
+Saturn — Real-time System Simulation
+====================================
+
+This project bundles third-party imagery and data. Attributions:
+
+Textures & imagery
+------------------
+
+- Saturn globe map: Solar System Scope (INOVE CZ),
+  https://www.solarsystemscope.com/textures/ — licensed CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/). Graded in-shader toward
+  Cassini natural color.
+
+- Moon global mosaics (Mimas, Enceladus, Tethys, Dione, Rhea, Iapetus):
+  NASA/JPL-Caltech/Space Science Institute/Lunar and Planetary Institute
+  (Paul Schenk's Cassini color mosaics, PIA18434–18439) — public domain.
+
+- Star map: NASA/GSFC Scientific Visualization Studio, "Deep Star Maps 2020".
+  Underlying star data: Gaia DR2 — ESA/Gaia/DPAC
+  (https://www.cosmos.esa.int/gaia).
+
+- Ring radial profiles (color, transparency, backscattered / forward-
+  scattered / unlit-side brightness): Björn Jónsson's ring model (Voyager
+  PPS + Cassini data via the PDS Ring-Moon Systems Node), 13,177 samples at
+  5 km resolution, baked into runtime binaries by scripts/bake-rings.mjs.
+
+Topography (DTMs / shape models)
+--------------------------------
+
+- Mimas, Tethys: Gaskell SPC shape models V2.0/V1.0 (NASA PDS).
+- Enceladus: global DEM 200 m, Schenk & McKinnon 2024 (USGS Astropedia) —
+  cite Icarus 408, 115827.
+- Dione: SPC DTM, Weirich et al. 2025 (NASA PDS SBN).
+- Rhea and Iapetus have no public DTM as of 2026; their relief is synthetic
+  (procedural, documented in README).
+
+Ephemeris & reference data
+--------------------------
+
+- Satellite mean orbital elements & physical parameters: NASA/JPL Solar
+  System Dynamics (https://ssd.jpl.nasa.gov/sats/elem/).
+- Ring region radii: Cassini / PDS Ring-Moon Systems Node
+  (https://pds-rings.seti.org/).
+- Saturn pole orientation: IAU WGCCRE reports.
+- Color calibration reference: Cassini natural-color photographs
+  (PIA21345, PIA06175).

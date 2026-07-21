@@ -67,8 +67,8 @@ Append `?webgl` to the URL to force the WebGL2 backend.
   forward-scattering E ring; a volumetric particle slab fades in for ring
   fly-throughs, with self-gravity wakes, azimuthal grain, a kinked clumpy
   F ring and B-ring spokes on the main rings.
-- **Cinematic pipeline**: HDR sun (radiance ≫1) driving physical bloom,
-  anamorphic streak and lens ghosts gated by real sun occlusion; AgX tone
+- **Cinematic pipeline**: HDR sun (radiance ≫1) driving physical bloom and
+  lens ghosts gated by real sun occlusion; AgX tone
   mapping (calibrated against Cassini natural color), DOF focused on the
   tracked body (hyperfocal at planetary distances), subtle chromatic
   aberration, vignette and film grain; Cinema mode with a timed tour.
@@ -144,6 +144,6 @@ heliocentric anchors — the orbital module already supports any parent frame.
 ## Known simplifications
 
 - Node/apsidal precession of moon orbits is neglected (mean elements only).
-- Moons do not eclipse each other and receive no ring shadows.
+- Moons do not eclipse each other.
 - Hyperion's chaotic tumble is a visual approximation, not an integration.
-- The E ring and shepherd moonlets are not rendered.
+- Shepherd moonlets are not rendered.

@@ -203,11 +203,6 @@ export class Engine {
     copyCameraPose(this.camera, this.solarCamera);
   }
 
-  /** @deprecated use syncAuxCameras */
-  syncSolarCamera(): void {
-    this.syncAuxCameras();
-  }
-
   /** Register a compute pass to run every frame (GPU particles etc.). */
   addCompute(node: object): void {
     this.computes.push(node);

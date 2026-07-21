@@ -93,7 +93,7 @@ async function boot(): Promise<void> {
     exitEl: (() => {
       const el = document.createElement('div');
       el.className = 'cinema-exit';
-      el.textContent = 'Esc para sair';
+      el.textContent = 'Esc to exit';
       document.body.appendChild(el);
       return el;
     })(),
@@ -239,10 +239,13 @@ async function boot(): Promise<void> {
   engine.start(frame);
 
   // Dev/testing hook: drive frames manually (headless tabs never fire rAF).
-  if (import.meta.env.DEV) {
+  // ?qa=1 exposes the same hook in production builds so smoke tests exercise
+  // the real bundle (BASE_URL, minification, preload).
+  if (import.meta.env.DEV || new URLSearchParams(location.search).has('qa')) {
     (window as unknown as Record<string, unknown>).__saturn = {
       engine, system, clock, controls, focusBody,
       step: async (dt = 1 / 60) => { frame(dt); await engine.renderOnce(); },
+      sunVisibility: () => sunVisibilityUniform.value,
     };
   }
 }

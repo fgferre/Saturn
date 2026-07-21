@@ -20,7 +20,6 @@ export interface QualityPreset {
   slabCount: number;
   moonSegments: [number, number];
   dof: boolean;
-  anamorphic: boolean;
   lensflare: boolean;
   filmGrain: number;
 }
@@ -29,22 +28,22 @@ export const PRESETS: Record<QualityName, QualityPreset> = {
   low: {
     name: 'low', label: 'Low', dprCap: 1, msaaSamples: 0, raymarchSteps: 8,
     plumeCount: 16384, slabCount: 8192, moonSegments: [96, 48],
-    dof: false, anamorphic: false, lensflare: false, filmGrain: 0,
+    dof: false, lensflare: false, filmGrain: 0,
   },
   med: {
     name: 'med', label: 'Med', dprCap: 1.5, msaaSamples: 2, raymarchSteps: 12,
     plumeCount: 65536, slabCount: 24576, moonSegments: [128, 64],
-    dof: false, anamorphic: false, lensflare: true, filmGrain: 0.03,
+    dof: false, lensflare: true, filmGrain: 0.03,
   },
   high: {
     name: 'high', label: 'High', dprCap: 2, msaaSamples: 4, raymarchSteps: 16,
     plumeCount: 262144, slabCount: 65536, moonSegments: [192, 96],
-    dof: true, anamorphic: true, lensflare: true, filmGrain: 0.035,
+    dof: true, lensflare: true, filmGrain: 0.035,
   },
   ultra: {
     name: 'ultra', label: 'Ultra', dprCap: 2, msaaSamples: 4, raymarchSteps: 24,
     plumeCount: 1048576, slabCount: 131072, moonSegments: [256, 128],
-    dof: true, anamorphic: true, lensflare: true, filmGrain: 0.04,
+    dof: true, lensflare: true, filmGrain: 0.04,
   },
 };
 
@@ -53,6 +52,10 @@ const TUNED_KEY = 'saturn.autotuned';
 
 function load(): QualityPreset {
   try {
+    // QA: ?quality=<preset> pins a preset for this page load only — never
+    // persisted, so headless runs don't disturb the stored user choice.
+    const pinned = new URLSearchParams(location.search).get('quality') as QualityName | null;
+    if (pinned && PRESETS[pinned]) return PRESETS[pinned];
     const name = localStorage.getItem(STORAGE_KEY) as QualityName | null;
     if (name && PRESETS[name]) return PRESETS[name];
   } catch { /* storage unavailable */ }
@@ -76,12 +79,24 @@ export function setQuality(name: QualityName): void {
 }
 
 /**
+ * QA: ?notune disables the auto-tuner — it can location.reload() in the
+ * middle of a headless capture run.
+ */
+const tuneDisabled = (() => {
+  try {
+    return new URLSearchParams(location.search).has('notune');
+  } catch {
+    return false;
+  }
+})();
+
+/**
  * One-shot downgrade if the machine clearly can't hold the default preset.
  * Call with measured fps after a few seconds of rendering.
  */
 export function autoTuneDown(measuredFps: number): void {
   try {
-    if (localStorage.getItem(TUNED_KEY)) return;
+    if (tuneDisabled || localStorage.getItem(TUNED_KEY)) return;
     localStorage.setItem(TUNED_KEY, '1');
     const order: QualityName[] = ['low', 'med', 'high', 'ultra'];
     const idx = order.indexOf(quality.name);

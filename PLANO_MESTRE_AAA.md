@@ -172,6 +172,18 @@ Onda 9 (eventos + polish final)
 limpo; `deploy.mjs` aborta se `npm run check` falhar; capturas `?post=raw`
 idênticas antes/depois; `npm run check` verde.
 
+> **Nota de execução (Onda 0, commit F6.1):** itens 2–10 implementados;
+> `npm run check` + `npm run build` verdes (avisos de `atan2` eliminados pela
+> migração S17). O harness `scripts/qa-capture.mjs` + `playwright-core` está
+> no repo e sobe `vite preview` + chromium headless, mas a captura via
+> `engine.capture()` falha neste ambiente headless: WebGPU não inicializa sem
+> adapter e o WebGL2 cai para SwiftShader, onde `readRenderTargetPixelsAsync`
+> (`copyTextureToBuffer`) quebra com `Unsupported WebGL type: undefined`.
+> Os diffs desta onda são todos não-render (dead-method, config morta, i18n,
+> meta tags, NOTICE, AGENTS) — `atan2`→`atan` é matemática idêntica (substituto
+> canônico r178). Em GPU real o gate de identidade deve rodar; deixar para
+> validar no fechamento do programa ou quando houver GPU disponível.
+
 ---
 
 ## 5. Onda 5 — Produto: quick wins + HUD vivo (prefixo `F8`) — Esforço M

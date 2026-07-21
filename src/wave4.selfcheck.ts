@@ -20,7 +20,7 @@ import {
   SUN_DISK_UV_RADIUS,
   SUN_DISPLAY_RADIANCE,
   SUN_FOLLOW_DISTANCE,
-  SUN_SEED_RADIANCE,
+  SUN_SEED_CORE_RADIANCE,
   SUN_SEED_SCALE,
   DISPLAY_SUN_LAYER,
   SOLAR_LAYER,
@@ -142,6 +142,6 @@ assert.ok(typeof saturnShadowOnMoon === 'function', 'moon eclipse helper intact'
 console.log('wave4 selfcheck: all assertions passed');
 console.log(
   `  angular dia≈${((2 * SUN_ANGULAR_RADIUS * SUN_APPARENT_SCALE * 180) / Math.PI).toFixed(3)}° ` +
-  `scale=${SUN_APPARENT_SCALE} diskR=${SUN_DISK_RADIUS.toFixed(3)} rad=${SUN_DISPLAY_RADIANCE}/${SUN_SEED_RADIANCE}`,
+  `scale=${SUN_APPARENT_SCALE} diskR=${SUN_DISK_RADIUS.toFixed(3)} rad=${SUN_DISPLAY_RADIANCE}/${SUN_SEED_CORE_RADIANCE}`,
 );
 console.log('  no AmbientLight; moon glare occultation; limb tint; ring penumbra samples');

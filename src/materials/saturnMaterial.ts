@@ -12,7 +12,7 @@
 import { Texture } from 'three';
 import type { MeshStandardNodeMaterial } from 'three/webgpu';
 import {
-  abs, add, atan2, clamp, cos, float, fract, max, min, mix, mul,
+  abs, add, atan, clamp, cos, float, fract, max, min, mix, mul,
   mx_fractal_noise_float, mx_noise_float, oneMinus, positionLocal,
   positionWorld, smoothstep, sqrt, step, texture, uv, vec2, vec3,
 } from 'three/tsl';
@@ -97,7 +97,7 @@ function animatedSurface(map: Texture): NodeObj {
 function polarHexagon(color: NodeObj): NodeObj {
   const p = positionLocal.normalize(); // geometry radius is 60.268 units
   const lat = p.y; // sin(latitude) after normalize
-  const lon = atan2(p.z, p.x);
+  const lon = atan(p.z, p.x);
   // Hexagonal radius modulation of the collar boundary (~78°N: sinLat≈0.978).
   const hexEdge = float(0.9724).add(cos(lon.mul(6).add(cloudPhaseUniform.mul(0.35))).mul(0.0035));
   const inHex = smoothstep(hexEdge.sub(0.0015), hexEdge.add(0.0015), lat);

@@ -15,7 +15,7 @@ import {
   SUN_DISK_SCALE,
   SUN_DISPLAY_RADIANCE,
   SUN_FOLLOW_DISTANCE,
-  SUN_SEED_RADIANCE,
+  SUN_SEED_CORE_RADIANCE,
   SUN_SEED_SCALE,
 } from './scene/Sun.ts';
 import { SKY_RADIUS } from './scene/Starfield.ts';
@@ -193,17 +193,13 @@ function residualSky(camera: Vector3, sky: Vector3): number {
   assert.ok(engSrc.includes('setRenderTarget(prevRT)'), 'previous RT restored');
 }
 
-// --- F. Angular sizes recorded separately -----------------------------------
-{
-  const halfQuad = Math.atan((SUN_DISK_SCALE / 2) / SUN_FOLLOW_DISTANCE) * (180 / Math.PI);
-  const halfSeed = Math.atan((SUN_SEED_SCALE / 2) / SUN_FOLLOW_DISTANCE) * (180 / Math.PI);
-  // Core ≈ inner falloff edge 0.12 of half-quad in UV → ~0.12 * halfQuad * 2? rough
-  const coreHalf = halfQuad * (0.12 / 0.5);
-  assert.ok(coreHalf > 0.02 && coreHalf < 1.0, `core half-angle ${coreHalf}`);
-  assert.ok(halfSeed > halfQuad, 'seed angular size > display quad');
-}
+// --- F. (removed — S28) ------------------------------------------------------
+// Vestigial angular-size assertions of the old sprite sun: they passed without
+// affirming anything about the physical sun. The physical contract (disk radius
+// from SUN_ANGULAR_RADIUS, apparent-diameter band, UV margin, radiance floors)
+// is covered by the F7.1 block in wave4.selfcheck.ts.
 
 console.log('wave3 selfcheck: all assertions passed');
 console.log(`  follow=${SUN_FOLLOW_DISTANCE} skyR=${SKY_RADIUS} orbitMax=${ORBIT_MAX_DISTANCE}`);
-console.log(`  displayScale=${SUN_DISK_SCALE} seedScale=${SUN_SEED_SCALE} rad=${SUN_DISPLAY_RADIANCE}/${SUN_SEED_RADIANCE}`);
+console.log(`  displayScale=${SUN_DISK_SCALE} seedScale=${SUN_SEED_SCALE} rad=${SUN_DISPLAY_RADIANCE}/${SUN_SEED_CORE_RADIANCE}`);
 console.log('  frame order source-checked; residual policy < 1e-6; solar-only lens chain asserted');
