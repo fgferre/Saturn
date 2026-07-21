@@ -252,6 +252,64 @@
 .hud-photo:hover, .hud-share:hover { color: var(--hud-text); border-color: rgba(255,255,255,0.25); }
 .hud-photo:disabled { opacity: 0.5; cursor: default; }
 
+/* Events panel — bottom right. Scrollable one-off list + live apoapsis row. */
+.hud-events {
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  width: 232px;
+  max-height: 44vh;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px 8px;
+}
+.hud-events-title {
+  padding: 0 6px 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+  opacity: 0.7;
+}
+.hud-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.hud-event {
+  all: unset;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.hud-event:hover { background: rgba(255,255,255,0.06); }
+.hud-event:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.hud-event .ev-icon { color: var(--accent); font-size: 11px; text-align: center; }
+.hud-event .ev-name {
+  color: var(--hud-text);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-event .ev-date {
+  color: var(--hud-dim);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hud-event:hover .ev-name { color: var(--accent); }
+/* The live recurring row (next apoapsis) gets a faint accent rule under it. */
+.hud-event.recurring { border-bottom: 1px solid var(--hud-border); border-radius: 6px 6px 0 0; margin-bottom: 2px; }
+
 /* Help overlay — centered modal, toggled by '?'. Hidden until .show. */
 .hud-help {
   position: absolute;
@@ -387,5 +445,6 @@ body.cinema .cinema-exit { opacity: 1; }
 
 @media (max-width: 720px) {
   .hud-info { display: none; }
+  .hud-events { display: none; }
   .hud-bodies { max-height: 46vh; }
 }

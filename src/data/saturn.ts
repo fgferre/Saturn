@@ -118,6 +118,27 @@ export const SATURN_HELIOCENTRIC = {
   epochJD: J2000,
 };
 
+/**
+ * Earth (Earth–Moon barycenter) heliocentric mean elements — same J2000
+ * ecliptic form as SATURN_HELIOCENTRIC. Its only jobs: place the Earth for the
+ * "distance from Earth" readout and let the event browser (F12.1) find Saturn
+ * oppositions (Earth's heliocentric longitude lapping Saturn's). Perturbations
+ * are neglected, so opposition timing is good to ~1 day, not to the minute.
+ * ⚠ VERIFICAR: JPL SSD "Keplerian Elements for Approximate Positions of the
+ * Major Planets" (EM Bary, J2000): a=1.00000261 AU, e=0.01671123,
+ * i=-0.00001531°, L=100.46457166°, ϖ=102.93768193°, Ω=0°.
+ */
+export const EARTH_HELIOCENTRIC = {
+  aKm: 1.00000261 * 149597870.7,
+  e: 0.01671123,
+  iDeg: -0.00001531,
+  nodeDeg: 0.0,
+  periDeg: 102.93768193 - 0.0, // longitude of perihelion minus node
+  m0Deg: 100.46457166 - 102.93768193, // mean longitude minus longitude of perihelion
+  periodDays: 365.25636, // sidereal year
+  epochJD: J2000,
+};
+
 /** Saturn's north pole, ICRF right ascension / declination, degrees (IAU). */
 export const SATURN_POLE = { raDeg: 40.589, decDeg: 83.537 };
 

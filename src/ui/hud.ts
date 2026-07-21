@@ -1,9 +1,10 @@
 /** DOM HUD: time controls, body selector, info panel. No framework needed. */
 
 import './hud.css';
-import { dateToJD, J2000, type BodyDefinition } from '../orbital/types.ts';
+import { dateToJD, jdToDate, J2000, type BodyDefinition } from '../orbital/types.ts';
 import { PRESETS, quality, setQuality, type QualityName } from '../core/quality.ts';
 import { FOV_DEFAULT, FOV_MAX, FOV_MIN } from '../core/urlState.ts';
+import type { SaturnEvent } from '../data/events.ts';
 
 /** Date-picker validity window — J2000 ± 200 Julian years (matches urlState). */
 const JD_HALF_SPAN = 200 * 365.25;
@@ -57,6 +58,20 @@ export interface LiveInfo {
 function fmtDate(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', '  ') + ' UTC';
 }
+
+/** Compact event date: `YYYY-MM-DD HH:MM`. */
+function fmtEventDate(jd: number): string {
+  return jdToDate(jd).toISOString().slice(0, 16).replace('T', ' ');
+}
+
+/** One-glyph category tag for the event list. */
+const EVENT_ICON: Record<SaturnEvent['category'], string> = {
+  equinox: '⊙',
+  solstice: '☀',
+  opposition: '◆',
+  'titan-transit': '◐',
+  apoapsis: '❂',
+};
 
 /** Angular size in the most readable unit. */
 function fmtAngle(deg: number): string {
@@ -112,6 +127,11 @@ export class Hud {
   private readonly infoBlurb: HTMLElement;
   private readonly infoStats: HTMLElement;
   private readonly toastEl: HTMLElement;
+  private readonly eventsListEl: HTMLElement;
+  /** The recurring "next apoapsis" row, refreshed as sim time advances. */
+  private apoapsisRow?: HTMLButtonElement;
+  private apoapsisEvent?: SaturnEvent;
+  private onEventJump: (e: SaturnEvent) => void = () => {};
   private readonly bodyButtons = new Map<string, HTMLButtonElement>();
   private readonly speedButtons: HTMLButtonElement[] = [];
   private pauseBtn!: HTMLButtonElement;
@@ -374,6 +394,14 @@ export class Hud {
       }
     });
 
+    // Events panel — bottom right. A one-off list built once from the ±5-year
+    // sweep, plus a live "next apoapsis" row that tracks the simulated clock.
+    const events = document.createElement('div');
+    events.className = 'panel hud-events';
+    events.innerHTML = '<div class="hud-events-title">Events</div><div class="hud-events-list"></div>';
+    hud.appendChild(events);
+    this.eventsListEl = events.querySelector('.hud-events-list')!;
+
     // Help overlay ('?' toggles, Esc closes — bindings live in main.ts). Built
     // from the shared shortcut lists so it can never disagree with the keys.
     this.helpEl = document.createElement('div');
@@ -497,5 +525,50 @@ export class Hud {
   /** F10.3 — effective dynamic render-resolution (DPR) readout. */
   setDpr(dpr: number): void {
     this.dprEl.textContent = `${dpr.toFixed(2)}×`;
+  }
+
+  /** Build one clickable event row. `getEvent` is read at click time so the
+   *  recurring apoapsis row always jumps to its latest recomputed time. */
+  private eventRow(getEvent: () => SaturnEvent): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.className = 'hud-event';
+    btn.innerHTML =
+      '<span class="ev-icon"></span><span class="ev-name"></span><span class="ev-date"></span>';
+    btn.addEventListener('click', () => this.onEventJump(getEvent()));
+    return btn;
+  }
+
+  private fillEventRow(btn: HTMLButtonElement, e: SaturnEvent): void {
+    btn.querySelector('.ev-icon')!.textContent = EVENT_ICON[e.category];
+    btn.querySelector('.ev-name')!.textContent = e.rare ? `${e.name} (rare)` : e.name;
+    btn.querySelector('.ev-date')!.textContent = fmtEventDate(e.jd);
+    btn.title = `Jump to ${fmtEventDate(e.jd)} UTC`;
+  }
+
+  /**
+   * F12.1 — populate the one-off event list (built once) and register the jump
+   * handler. The recurring apoapsis row is created empty here and kept live via
+   * setNextApoapsis so it never enumerates all ~2,700 occurrences.
+   */
+  setEvents(events: SaturnEvent[], onJump: (e: SaturnEvent) => void): void {
+    this.onEventJump = onJump;
+    this.eventsListEl.replaceChildren();
+
+    // Live "next apoapsis" pinned at the top.
+    this.apoapsisRow = this.eventRow(() => this.apoapsisEvent!);
+    this.apoapsisRow.classList.add('recurring');
+    this.eventsListEl.appendChild(this.apoapsisRow);
+
+    for (const e of events) {
+      const row = this.eventRow(() => e);
+      this.fillEventRow(row, e);
+      this.eventsListEl.appendChild(row);
+    }
+  }
+
+  /** Refresh the recurring "next apoapsis" row from the live sim time. */
+  setNextApoapsis(e: SaturnEvent): void {
+    this.apoapsisEvent = e;
+    if (this.apoapsisRow) this.fillEventRow(this.apoapsisRow, e);
   }
 }

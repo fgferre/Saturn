@@ -20,6 +20,8 @@ import {
 } from './physics/eclipse.ts';
 import { solarTintUniform } from './scene/Sun.ts';
 import { KM_PER_UNIT, MINOR_MOONS, MOONS, SATURN } from './data/saturn.ts';
+import { nextEnceladusApoapsis, scanEvents, type SaturnEvent } from './data/events.ts';
+import { dateToJD } from './orbital/types.ts';
 import { Hud, SPEED_VALUES } from './ui/hud.ts';
 import { BodyLabels, occludedBySaturn } from './ui/labels.ts';
 import { Cinema } from './ui/cinema.ts';
@@ -284,6 +286,22 @@ async function boot(): Promise<void> {
   const labels = new BodyLabels(allBodies, focusBody);
   hud.setFocused('saturn');
   hud.setInfo(SATURN);
+
+  // F12.1 — event browser. One numeric sweep of the ±5-year window at boot for
+  // the one-off events; jumping applies the clock, focus and a per-category
+  // playback speed so short windows (a Titan shadow transit) aren't over before
+  // the user can orient. The recurring Enceladus apoapsis is refreshed from the
+  // live sim time in the frame loop (never enumerated).
+  hud.setEvents(scanEvents(dateToJD(new Date())), (e: SaturnEvent) => {
+    clock.jd = e.jd;
+    clock.speed = e.speed;
+    clock.paused = e.paused;
+    hud.setSpeed(e.speed);
+    hud.setPaused(e.paused);
+    focusBody(e.focus);
+    scheduleUrlWrite();
+  });
+  hud.setNextApoapsis(nextEnceladusApoapsis(clock.jd));
 
   // F8.3 — apply the restored focus, camera pose and speed now that the
   // controls/HUD exist. Unknown ids fall through to the default framing.
@@ -598,6 +616,8 @@ async function boot(): Promise<void> {
       hud.setFps(fpsFrames / fpsAccum);
       fpsAccum = 0;
       fpsFrames = 0;
+      // Recurring event: the next Enceladus apoapsis from the live sim time.
+      hud.setNextApoapsis(nextEnceladusApoapsis(clock.jd));
       const id = controls.focusId;
       const focused = byId.get(id)!;
       getPos(id, infoScratch); // body world position
