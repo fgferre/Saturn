@@ -1,8 +1,13 @@
 /** DOM HUD: time controls, body selector, info panel. No framework needed. */
 
 import './hud.css';
-import type { BodyDefinition } from '../orbital/types.ts';
+import { dateToJD, J2000, type BodyDefinition } from '../orbital/types.ts';
 import { PRESETS, quality, setQuality, type QualityName } from '../core/quality.ts';
+
+/** Date-picker validity window — J2000 ± 200 Julian years (matches urlState). */
+const JD_HALF_SPAN = 200 * 365.25;
+const JD_MIN = J2000 - JD_HALF_SPAN;
+const JD_MAX = J2000 + JD_HALF_SPAN;
 
 export interface HudCallbacks {
   onFocus(id: string): void;
@@ -16,6 +21,10 @@ export interface HudCallbacks {
   onCinema(): void;
   /** Capture + download a high-res PNG; the button stays disabled until it settles. */
   onPhoto(): void | Promise<void>;
+  /** Apply a user-entered simulation time (Julian Date, already validated). */
+  onDate(jd: number): void;
+  /** Flush the shareable URL and return `location.href` to copy / share. */
+  onShare(): string;
 }
 
 /** Live, camera-relative readouts refreshed a couple times a second. */
@@ -27,6 +36,11 @@ export interface LiveInfo {
   phaseDeg?: number;
   /** Fraction of sunlight reaching the body (0–100), umbra/ring shadow. */
   sunlightPct?: number;
+}
+
+/** HUD date readout: `YYYY-MM-DD  HH:MM:SS UTC`. */
+function fmtDate(date: Date): string {
+  return date.toISOString().slice(0, 19).replace('T', '  ') + ' UTC';
 }
 
 /** Angular size in the most readable unit. */
@@ -59,15 +73,27 @@ export class Hud {
   private readonly infoName: HTMLElement;
   private readonly infoBlurb: HTMLElement;
   private readonly infoStats: HTMLElement;
+  private readonly toastEl: HTMLElement;
   private readonly bodyButtons = new Map<string, HTMLButtonElement>();
   private readonly speedButtons: HTMLButtonElement[] = [];
   private pauseBtn!: HTMLButtonElement;
   private paused = false;
+  /** True while the date readout is swapped for its editor (don't clobber it). */
+  private editing = false;
+  /** Latest simulated date pushed via setDate — the editor prefills from it. */
+  private lastDate = new Date();
+  private toastTimer?: ReturnType<typeof setTimeout>;
 
   constructor(bodies: BodyDefinition[], backend: string, cb: HudCallbacks) {
     const hud = document.createElement('div');
     hud.id = 'hud';
     document.body.appendChild(hud);
+
+    // Transient toast (e.g. "Link copied"), reused across shows.
+    this.toastEl = document.createElement('div');
+    this.toastEl.className = 'hud-toast';
+    this.toastEl.setAttribute('role', 'status');
+    hud.appendChild(this.toastEl);
 
     // Brand.
     const brand = document.createElement('div');
@@ -103,8 +129,62 @@ export class Hud {
     });
     bar.appendChild(this.pauseBtn);
 
+    // Date readout doubles as a picker: click (or Enter/Space) swaps it for a
+    // datetime-local editor. Enter applies, Esc/blur cancels.
     this.dateEl = document.createElement('div');
     this.dateEl.className = 'date';
+    this.dateEl.tabIndex = 0;
+    this.dateEl.setAttribute('role', 'button');
+    this.dateEl.title = 'Click to set a date (UTC)';
+    const openDateEditor = (): void => {
+      if (this.editing) return;
+      this.editing = true;
+      const input = document.createElement('input');
+      input.type = 'datetime-local';
+      input.step = '1';
+      input.className = 'date-input';
+      input.min = '1800-01-01T00:00:00';
+      input.max = '2200-01-01T00:00:00';
+      // Prefill from the current sim time. The widget interprets the value as
+      // LOCAL wall-clock, but the HUD works in UTC — see commit() below.
+      input.value = this.lastDate.toISOString().slice(0, 19);
+      this.dateEl.textContent = '';
+      this.dateEl.appendChild(input);
+      input.focus();
+      const cancel = (): void => {
+        if (!this.editing) return;
+        this.editing = false;
+        this.dateEl.textContent = fmtDate(this.lastDate);
+      };
+      const commit = (): void => {
+        if (!this.editing) return;
+        // datetime-local yields a LOCAL wall-clock string; force UTC with 'Z'
+        // so the HUD's UTC readout round-trips.
+        const d = new Date(`${input.value}Z`);
+        const jd = Number.isNaN(d.getTime()) ? NaN : dateToJD(d);
+        if (Number.isFinite(jd) && jd >= JD_MIN && jd <= JD_MAX) {
+          this.editing = false;
+          this.dateEl.textContent = fmtDate(d);
+          cb.onDate(jd);
+        } else {
+          cancel(); // empty / unparseable / out of range: revert
+        }
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        e.stopPropagation(); // keep global shortcuts out of the field
+      });
+      input.addEventListener('blur', cancel);
+    };
+    this.dateEl.addEventListener('click', openDateEditor);
+    this.dateEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        openDateEditor();
+      }
+    });
     bar.appendChild(this.dateEl);
 
     bar.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
@@ -149,6 +229,7 @@ export class Hud {
       </div>
       <div class="hud-actions">
         <button type="button" class="hud-photo" title="Save a sharp 1920px PNG of the current view">📷 Photo</button>
+        <button type="button" class="hud-share" title="Copy a shareable link to this exact view">🔗 Share</button>
       </div>`;
     hud.appendChild(info);
     this.infoName = info.querySelector('h2')!;
@@ -193,6 +274,32 @@ export class Hud {
         photoBtn.disabled = false;
       }
     });
+
+    // Share: flush the throttled URL, then hand the link to the OS share sheet
+    // (mobile) or the clipboard (desktop). Both can reject — a dismissed share
+    // sheet throws AbortError, clipboard needs a secure context — so swallow.
+    const shareBtn = info.querySelector<HTMLButtonElement>('.hud-share')!;
+    shareBtn.addEventListener('click', async () => {
+      const url = cb.onShare();
+      try {
+        if (typeof navigator.share === 'function') {
+          await navigator.share({ title: 'Saturn', url });
+        } else {
+          await navigator.clipboard.writeText(url);
+          this.toast('Link copied');
+        }
+      } catch {
+        /* user dismissed the share sheet, or clipboard was blocked */
+      }
+    });
+  }
+
+  /** Briefly show a status toast (~1.5 s), reusing the single toast element. */
+  private toast(msg: string): void {
+    this.toastEl.textContent = msg;
+    this.toastEl.classList.add('show');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => this.toastEl.classList.remove('show'), 1500);
   }
 
   setFocused(id: string): void {
@@ -242,7 +349,9 @@ export class Hud {
   }
 
   setDate(date: Date): void {
-    this.dateEl.textContent = date.toISOString().slice(0, 19).replace('T', '  ') + ' UTC';
+    this.lastDate = date;
+    if (this.editing) return; // don't overwrite the picker while the user edits
+    this.dateEl.textContent = fmtDate(date);
   }
 
   setFps(fps: number): void {

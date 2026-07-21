@@ -50,6 +50,16 @@ export const PRESETS: Record<QualityName, QualityPreset> = {
 const STORAGE_KEY = 'saturn.quality';
 const TUNED_KEY = 'saturn.autotuned';
 
+/**
+ * Optional hook run synchronously before any preset reload. main.ts registers
+ * the URL flush here so the reload restores the full state (pose + date +
+ * focus) — quality.ts must not import ui/, so this is a plain callback seam.
+ */
+let beforeReload: (() => void) | null = null;
+export function setBeforeReload(fn: () => void): void {
+  beforeReload = fn;
+}
+
 function load(): QualityPreset {
   try {
     // QA: ?quality=<preset> pins a preset for this page load only — never
@@ -75,6 +85,7 @@ export function setQuality(name: QualityName): void {
     // destroy the session for a no-op.
     return;
   }
+  beforeReload?.(); // flush URL state so the reload lands on the same view
   location.reload();
 }
 
@@ -102,6 +113,7 @@ export function autoTuneDown(measuredFps: number): void {
     const idx = order.indexOf(quality.name);
     if (measuredFps < 30 && idx > 0) {
       localStorage.setItem(STORAGE_KEY, order[idx - 1]);
+      beforeReload?.(); // flush URL state so the reload lands on the same view
       location.reload();
     }
   } catch { /* ignore */ }

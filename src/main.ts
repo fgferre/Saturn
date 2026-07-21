@@ -21,7 +21,7 @@ import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
 import { Hud, SPEED_VALUES } from './ui/hud.ts';
 import { BodyLabels } from './ui/labels.ts';
 import { Cinema } from './ui/cinema.ts';
-import { autoTuneDown, quality } from './core/quality.ts';
+import { autoTuneDown, quality, setBeforeReload } from './core/quality.ts';
 import {
   offsetToSpherical, parseState, serializeState, sphericalToOffset,
   type UrlState,
@@ -147,6 +147,9 @@ async function boot(): Promise<void> {
     urlLastWrite = performance.now();
     writeUrl();
   };
+  // A preset change reloads the page (quality.ts); flush first so the reload
+  // restores pose + date + focus instead of teleporting to the opening framing.
+  setBeforeReload(flushUrl);
   // Camera pose changes: write when the drag/zoom interaction ends, not per frame.
   controls.controls.addEventListener('end', scheduleUrlWrite);
 
@@ -192,6 +195,8 @@ async function boot(): Promise<void> {
     onSpeed: (v) => { clock.speed = v; scheduleUrlWrite(); },
     onPause: (p) => { clock.paused = p; scheduleUrlWrite(); },
     onNow: () => { clock.setNow(); scheduleUrlWrite(); },
+    onDate: (jd) => { clock.jd = jd; scheduleUrlWrite(); },
+    onShare: () => { flushUrl(); return location.href; },
     onToggleOrbits: (v) => system.setOrbitsVisible(v),
     onToggleLabels: (v) => { labels.visible = v; },
     onToggleDrift: (v) => {
