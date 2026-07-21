@@ -60,7 +60,7 @@
 
 | # | Fato | Evidência |
 |---|---|---|
-| S1 | Ondas 1–4 **não commitadas** (13 modificados + untracked) | `git status` |
+| S1 | ~~Ondas 1–4 não commitadas~~ ✓ **resolvido**: baseline commitada em `8e8498f` (+ docs `7de7986`, plano `889cd78`) | `git log` |
 | S6 | Spokes do anel B sempre visíveis (real: fenômeno de quase-equinócio) | `ringsMaterial.ts:100-112` |
 | S7 | Plumes de Enceladus com atividade constante (real: varia ~4× com a maré diurna) | `effects/plumes.ts:94-95` |
 | S8 | Compute das plumes roda todo frame mesmo invisível (1M partículas no Ultra) | `main.ts`, `Engine.ts:221` |
