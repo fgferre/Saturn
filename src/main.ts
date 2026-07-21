@@ -37,6 +37,11 @@ export function flushUrl(): void {
   flushUrlImpl?.();
 }
 
+/** Simulated UTC time as `YYYYMMDDTHHMMSS` for photo filenames. */
+function photoStamp(date: Date): string {
+  return date.toISOString().slice(0, 19).replace(/[-:]/g, '');
+}
+
 async function boot(): Promise<void> {
   const container = document.getElementById('app')!;
   const boot = document.getElementById('boot');
@@ -152,6 +157,36 @@ async function boot(): Promise<void> {
     scheduleUrlWrite();
   };
 
+  // F8.2 — save a high-res PNG of the current view. Two robustness measures:
+  //   • DPR policy: capture(1920) upscales (blurry) when the drawing buffer is
+  //     narrower than 1920 (common at DPR=1). Bump the effective pixel ratio so
+  //     the buffer is ≥ 1920 wide, render native, then restore. The DPR change
+  //     happens AROUND capture(), never inside it (capture calling setSize is a
+  //     PassNode black-frame regression, forbidden by wave4 selfcheck).
+  //   • DOF-clean: the full-post DOF blurs the whole frame whenever the aperture
+  //     is nonzero (close fly-bys), so force it to 0 for the shot and restore.
+  const PHOTO_WIDTH = 1920;
+  const savePhoto = async (): Promise<void> => {
+    const cssWidth = container.clientWidth || 1280;
+    const prevDpr = engine.renderer.getPixelRatio();
+    const prevAperture = engine.dofAperture.value;
+    const photoDpr = Math.max(prevDpr, PHOTO_WIDTH / cssWidth);
+    try {
+      engine.dofAperture.value = 0;
+      if (photoDpr !== prevDpr) engine.renderer.setPixelRatio(photoDpr);
+      const dataUrl = await engine.capture(PHOTO_WIDTH, true);
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `saturn_${photoStamp(clock.date)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      if (photoDpr !== prevDpr) engine.renderer.setPixelRatio(prevDpr);
+      engine.dofAperture.value = prevAperture;
+    }
+  };
+
   const hud = new Hud(allBodies, engine.backendName, {
     onFocus: focusBody,
     onSpeed: (v) => { clock.speed = v; scheduleUrlWrite(); },
@@ -165,6 +200,7 @@ async function boot(): Promise<void> {
     },
     onExposure: (v) => { engine.renderer.toneMappingExposure = v; },
     onCinema: () => cinema.enter(),
+    onPhoto: savePhoto,
   });
 
   // Cinema mode (HUD fades, slow drift, timed tour) lives in its own module

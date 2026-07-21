@@ -209,6 +209,20 @@
 .hud-quality button.active { color: var(--accent); border-color: rgba(232,192,122,0.5); }
 .hud-cinema { margin-left: auto; color: var(--accent); }
 
+.hud-actions { display: flex; gap: 6px; margin-top: 8px; }
+.hud-photo {
+  all: unset;
+  cursor: pointer;
+  border: 1px solid var(--hud-border);
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--hud-dim);
+  transition: color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.hud-photo:hover { color: var(--hud-text); border-color: rgba(255,255,255,0.25); }
+.hud-photo:disabled { opacity: 0.5; cursor: default; }
+
 /* Cinema mode: HUD melts away, labels too. */
 body.cinema .panel,
 body.cinema .body-label { opacity: 0; pointer-events: none; transition: opacity 0.8s; }

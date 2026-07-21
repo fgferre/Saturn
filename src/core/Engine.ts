@@ -21,7 +21,7 @@
 
 import { AgXToneMapping, PerspectiveCamera, RenderTarget, Scene, Vector2 } from 'three';
 import { PostProcessing, WebGPURenderer } from 'three/webgpu';
-import { float, oneMinus, pass, screenUV, uniform, vec2, vec3 } from 'three/tsl';
+import { clamp, float, oneMinus, pass, screenUV, uniform, vec2, vec3 } from 'three/tsl';
 import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -130,8 +130,17 @@ export class Engine {
 
     // DOF on the composite using base depth (sun already depth-tested).
     if (this.postMode === 'full' && quality.dof) {
+      // DOF hardening (F8.2): the blur is a local average of the composite, so
+      // a *bounded* circle-of-confusion can only soften — never wash the frame
+      // to white. Two permanent guards make any nonzero aperture safe:
+      //   • aperture clamped to [0, 0.012] — a negative value would swap
+      //     near/far and blur the in-focus subject;
+      //   • maxblur (the CoC cap) held to 0.006 UV so the far field (stars,
+      //     the distant globe) survives regardless of the aperture fed in.
+      // Close fly-bys still read as shallow focus (main feeds ≤ 0.01).
+      const aperture = clamp(this.dofAperture, 0, 0.012);
       comp = dof(
-        comp, basePass.getViewZNode(), this.dofFocus, this.dofAperture, float(0.008),
+        comp, basePass.getViewZNode(), this.dofFocus, aperture, float(0.006),
       );
     }
 

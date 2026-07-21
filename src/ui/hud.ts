@@ -14,6 +14,8 @@ export interface HudCallbacks {
   onToggleDrift(v: boolean): void;
   onExposure(v: number): void;
   onCinema(): void;
+  /** Capture + download a high-res PNG; the button stays disabled until it settles. */
+  onPhoto(): void | Promise<void>;
 }
 
 /** Live, camera-relative readouts refreshed a couple times a second. */
@@ -144,6 +146,9 @@ export class Hud {
         <span>Quality</span>
         <div class="hud-quality-btns"></div>
         <button type="button" class="hud-cinema" title="Cinematic tour (Esc exits)">✦ Cinema</button>
+      </div>
+      <div class="hud-actions">
+        <button type="button" class="hud-photo" title="Save a sharp 1920px PNG of the current view">📷 Photo</button>
       </div>`;
     hud.appendChild(info);
     this.infoName = info.querySelector('h2')!;
@@ -169,6 +174,25 @@ export class Hud {
     }
     info.querySelector<HTMLButtonElement>('.hud-cinema')!
       .addEventListener('click', () => cb.onCinema());
+
+    // Photo: disable the button for the whole async capture so a second click
+    // can't race the in-flight frame freeze (Engine.capture already guards the
+    // loop, but the disabled state also signals "working" to the user).
+    const photoBtn = info.querySelector<HTMLButtonElement>('.hud-photo')!;
+    photoBtn.addEventListener('click', async () => {
+      if (photoBtn.disabled) return;
+      photoBtn.disabled = true;
+      const label = photoBtn.textContent;
+      photoBtn.textContent = 'Saving…';
+      try {
+        await cb.onPhoto();
+      } catch (err) {
+        console.error('photo capture failed', err);
+      } finally {
+        photoBtn.textContent = label;
+        photoBtn.disabled = false;
+      }
+    });
   }
 
   setFocused(id: string): void {
