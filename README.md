@@ -152,4 +152,6 @@ heliocentric anchors — the orbital module already supports any parent frame.
 - Node/apsidal precession of moon orbits is neglected (mean elements only).
 - Moons do not eclipse each other.
 - Hyperion's chaotic tumble is a visual approximation, not an integration.
-- Shepherd moonlets are not rendered.
+- Janus and Epimetheus are rendered co-orbital with a fixed longitude offset;
+  their real ~4-year horseshoe orbit swap is not simulated.
+- Minor-moon shapes are procedural (fbm displacement), not Cassini shape models.
