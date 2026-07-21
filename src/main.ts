@@ -141,6 +141,7 @@ async function boot(): Promise<void> {
 
   const sunDir = new Vector3();
   const camDist = new Vector3();
+  const infoScratch = new Vector3();
   const solarTintScratch = new Vector3(1, 1, 1);
   /** Moon disks for solar-eclipse glare gating (rebuilt each frame). */
   const moonDisks: { pos: Vector3; radius: number }[] = MOONS.map(() => ({
@@ -239,9 +240,25 @@ async function boot(): Promise<void> {
       hud.setFps(fpsFrames / fpsAccum);
       fpsAccum = 0;
       fpsFrames = 0;
-      const focused = byId.get(controls.focusId)!;
-      getPos(controls.focusId, camDist);
-      hud.setInfo(focused, camDist.sub(camera.position).length() * KM_PER_UNIT);
+      const id = controls.focusId;
+      const focused = byId.get(id)!;
+      getPos(id, infoScratch); // body world position
+      const distUnits = infoScratch.distanceTo(camera.position);
+      const radiusUnits = focused.physical.radiusKm / KM_PER_UNIT;
+      const apparentDeg =
+        (2 * Math.atan(radiusUnits / Math.max(distUnits, 1e-6)) * 180) / Math.PI;
+      // Phase angle at the body between the camera and the Sun.
+      camDist.copy(camera.position).sub(infoScratch).normalize();
+      const phaseDeg =
+        (Math.acos(Math.max(-1, Math.min(1, camDist.dot(sunDir)))) * 180) / Math.PI;
+      // Sunlight reaching the body (umbra / ring shadow). Saturn has no slot.
+      const el = system.bodies.get(id)?.eclipseLight;
+      hud.setInfo(focused, {
+        distanceKm: distUnits * KM_PER_UNIT,
+        apparentDeg,
+        phaseDeg,
+        sunlightPct: el ? el.value * 100 : undefined,
+      });
     }
   };
 

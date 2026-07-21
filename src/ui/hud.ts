@@ -16,6 +16,24 @@ export interface HudCallbacks {
   onCinema(): void;
 }
 
+/** Live, camera-relative readouts refreshed a couple times a second. */
+export interface LiveInfo {
+  distanceKm?: number;
+  /** Apparent angular diameter, degrees. */
+  apparentDeg?: number;
+  /** Sun–body–camera phase angle, degrees (0 = full, 180 = new). */
+  phaseDeg?: number;
+  /** Fraction of sunlight reaching the body (0–100), umbra/ring shadow. */
+  sunlightPct?: number;
+}
+
+/** Angular size in the most readable unit. */
+function fmtAngle(deg: number): string {
+  if (deg >= 1) return `${deg.toFixed(1)}°`;
+  if (deg >= 1 / 60) return `${(deg * 60).toFixed(1)}′`;
+  return `${(deg * 3600).toFixed(1)}″`;
+}
+
 const SPEEDS: { label: string; value: number }[] = [
   { label: '1×', value: 1 },
   { label: '1 min/s', value: 60 },
@@ -149,7 +167,7 @@ export class Hud {
     for (const [bid, btn] of this.bodyButtons) btn.classList.toggle('active', bid === id);
   }
 
-  setInfo(def: BodyDefinition, distanceKm?: number): void {
+  setInfo(def: BodyDefinition, live?: LiveInfo): void {
     this.infoName.textContent = def.name;
     this.infoBlurb.textContent = def.blurb ?? '';
     const rows: [string, string][] = [
@@ -162,8 +180,18 @@ export class Hud {
         ['Eccentricity', def.elements.e.toFixed(4)],
       );
     }
-    if (distanceKm !== undefined) {
-      rows.push(['Camera distance', `${Math.round(distanceKm).toLocaleString('en-US')} km`]);
+    // Live, camera-relative physics (updated a couple times a second).
+    if (live?.distanceKm !== undefined) {
+      rows.push(['Camera distance', `${Math.round(live.distanceKm).toLocaleString('en-US')} km`]);
+    }
+    if (live?.apparentDeg !== undefined) {
+      rows.push(['Apparent size', fmtAngle(live.apparentDeg)]);
+    }
+    if (live?.phaseDeg !== undefined) {
+      rows.push(['Phase angle', `${Math.round(live.phaseDeg)}°`]);
+    }
+    if (live?.sunlightPct !== undefined) {
+      rows.push(['Sunlight', `${Math.round(live.sunlightPct)}%`]);
     }
     this.infoStats.innerHTML = rows
       .map(([k, v]) => `<span>${k}</span><b>${v}</b>`)
