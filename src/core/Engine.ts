@@ -112,7 +112,12 @@ export class Engine {
 
     // Beauty bloom source: layer 0 only — never the display sun.
     const bloomSrc = pass(this.scene, this.bloomCamera, { samples: 0 });
-    const beautyBloom = bloom(bloomSrc, 0.35, 0.4, 0.9);
+    // radius kept low: three's BloomNode blends a mip pyramid, and a wide
+    // radius weights the coarse (blocky) mips → a square/boxy halo on bright
+    // point sources (moons, the Earth dot, stars). A tight radius weights the
+    // fine mips, so the glow stays round. (The Sun already sidesteps this with
+    // a painted round seed — gotcha §16.)
+    const beautyBloom = bloom(bloomSrc, 0.5, 0.12, 0.85);
 
     // F7.2 — solar glare: round profile is *painted on the seed sprite*
     // (core + r⁻² skirt). Composite solarPass directly — no wide BloomNode
