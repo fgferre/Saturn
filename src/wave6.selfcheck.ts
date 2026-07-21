@@ -3,11 +3,15 @@
  * heliocentric distance (achado S35). Run via `npm run check`.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   SATURN_MEAN_DISTANCE_AU,
   saturnSunDistanceAU,
 } from './data/sunDirection.ts';
-import { SATURN_HELIOCENTRIC } from './data/saturn.ts';
+import { MOONS, SATURN_HELIOCENTRIC } from './data/saturn.ts';
+import { meanAnomalyAt } from './orbital/kepler.ts';
 import {
   SUN_DISPLAY_RADIANCE,
   SUN_LIGHT_INTENSITY,
@@ -61,6 +65,59 @@ let rAph = -Infinity;
     'irradiance uniform defaults to 1 (mean distance) so AgX anchors hold');
   assert.ok(SUN_DISPLAY_RADIANCE === 90, 'SUN_DISPLAY_RADIANCE must stay 90 (mean)');
   assert.ok(SUN_LIGHT_INTENSITY > 0, 'base light intensity positive');
+}
+
+const base = dirname(fileURLToPath(import.meta.url));
+
+// --- F9.2 plume diurnal tidal cycle (achado S7) -----------------------------
+// activity = 0.625 − 0.375·cos(M): 0.25 at periapsis (M=0), 1.0 at apoapsis
+// (M=π), an exact 4:1 swing. Evaluate the pure formula (AgX compresses the
+// captured luminance, so a capture-ratio test is intestable).
+const plumeActivity = (M: number): number => 0.625 - 0.375 * Math.cos(M);
+{
+  const vale = plumeActivity(0);
+  const pico = plumeActivity(Math.PI);
+  assert.near(vale, 0.25, 1e-9, 'plume activity = 0.25 at periapsis (M=0)');
+  assert.near(pico, 1.0, 1e-9, 'plume activity = 1.0 at apoapsis (M=π)');
+  assert.near(pico / vale, 4, 1e-9, 'plume activity swings 4:1 exactly');
+  // Stays within band and never inverts across the whole orbit.
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < 360; i++) {
+    const a = plumeActivity((i / 360) * 2 * Math.PI);
+    lo = Math.min(lo, a);
+    hi = Math.max(hi, a);
+  }
+  assert.near(lo, 0.25, 1e-9, 'activity floor is 0.25');
+  assert.near(hi, 1.0, 1e-9, 'activity ceiling is 1.0');
+}
+
+// --- Enceladus period ≈ 1.37 d drives the cycle (from the orbital elements) -
+{
+  const enceladus = MOONS.find((m) => m.id === 'enceladus');
+  assert.ok(enceladus?.elements, 'Enceladus present with orbital elements');
+  const el = enceladus!.elements!;
+  assert.near(el.periodDays, 1.37, 0.01, 'Enceladus period ≈ 1.37 d');
+  // One orbit later the mean anomaly returns (cycle period == orbital period).
+  const jd0 = el.epochJD + 0.123;
+  const m0 = meanAnomalyAt(el, jd0);
+  const m1 = meanAnomalyAt(el, jd0 + el.periodDays);
+  assert.near(plumeActivity(m0), plumeActivity(m1), 1e-6,
+    'plume cycle repeats every orbital period');
+}
+
+// --- contract: plumeActivityUniform wired into the plume opacityNode --------
+{
+  const plumesSrc = readFileSync(join(base, 'effects/plumes.ts'), 'utf8');
+  assert.ok(
+    /opacityNode\s*=[\s\S]*\.mul\(\s*plumeActivityUniform\s*\)/.test(plumesSrc),
+    'F9.2: plumeActivityUniform must multiply the plume opacityNode',
+  );
+  const sysSrc = readFileSync(join(base, 'scene/SaturnSystem.ts'), 'utf8');
+  assert.ok(
+    /plumeActivityUniform\.value\s*=\s*0\.625\s*-\s*0\.375\s*\*\s*Math\.cos/.test(sysSrc),
+    'F9.2: SaturnSystem drives the activity from the mean-anomaly formula',
+  );
 }
 
 console.log('wave6 selfcheck: all assertions passed');

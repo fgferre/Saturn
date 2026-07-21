@@ -34,3 +34,9 @@ export const slabVisUniform = uniform(0);
 
 /** 0..1 — E-ring visibility (fades out when the camera is inside the torus). */
 export const eRingVisUniform = uniform(1);
+
+/**
+ * 0.25..1 — Enceladus' plume activity over its diurnal tidal cycle. Peaks near
+ * apoapsis when the tiger stripes are pulled open; multiplies the plume opacity.
+ */
+export const plumeActivityUniform = uniform(1);

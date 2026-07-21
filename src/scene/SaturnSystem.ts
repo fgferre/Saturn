@@ -14,7 +14,9 @@ import { vec3 as tslVec3 } from 'three/tsl';
 import { uniform } from 'three/tsl';
 import type { UniformNode } from 'three/webgpu';
 import type { BodyDefinition } from '../orbital/types.ts';
-import { elementsToPosition, orbitalAngleAt, sampleOrbit } from '../orbital/kepler.ts';
+import {
+  elementsToPosition, meanAnomalyAt, orbitalAngleAt, sampleOrbit,
+} from '../orbital/kepler.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from '../data/saturn.ts';
 import { createRingProfile, type RingProfile } from '../materials/ringProfile.ts';
 import type { BodyMaps } from '../materials/textures.ts';
@@ -25,7 +27,8 @@ import { createRaymarchedAtmosphere } from '../materials/raymarchAtmosphere.ts';
 import { createEnceladusPlumes, type PlumeSystem } from '../effects/plumes.ts';
 import { createERing } from '../effects/eRing.ts';
 import {
-  cloudPhaseUniform, edgeOnUniform, moonShadowUniforms, spokePhaseUniform,
+  cloudPhaseUniform, edgeOnUniform, moonShadowUniforms, plumeActivityUniform,
+  spokePhaseUniform,
 } from '../materials/sharedUniforms.ts';
 import { createFRing } from '../materials/fRing.ts';
 import { createRingSlab } from '../effects/ringSlab.ts';
@@ -251,6 +254,17 @@ export class SaturnSystem {
     // Cloud advection: equatorial jet laps the planet in ~9.75 days.
     // Wrapped every 10 laps to keep f32 precision (rare, brief reset).
     cloudPhaseUniform.value = (jd % 97.5) / 9.75;
+
+    // Enceladus' plume brightness swings ~4× over its diurnal tidal cycle,
+    // peaking near apoapsis (M=π) as the tiger stripes are pulled open. By
+    // the mean anomaly (r/a is degenerate at e=0.0047): 0.25 at periapsis,
+    // 1.0 at apoapsis — an exact 4:1 ratio. Peak lags apoapsis by hours
+    // (Hedman et al. 2013 / Nimmo et al. 2014 — ⚠ VERIFICAR: lag magnitude).
+    const enceladus = MOONS.find((m) => m.id === 'enceladus');
+    if (enceladus?.elements) {
+      const meanAnomaly = meanAnomalyAt(enceladus.elements, jd);
+      plumeActivityUniform.value = 0.625 - 0.375 * Math.cos(meanAnomaly);
+    }
 
     if (sunDir) this.ringshine.update(sunDir);
 
