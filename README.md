@@ -138,6 +138,12 @@ heliocentric anchors — the orbital module already supports any parent frame.
   Iapetus topography is **synthetic** (no public DTM exists as of 2026)
 - Color calibration reference: Cassini natural-color photographs
   (PIA21345, PIA06175)
+- **Resolution tiers**: `scripts/bake-texture-tiers.mjs` derives `1k/` and
+  `2k/` albedo sets from the originals — the Low preset loads `1k/`, Med loads
+  `2k/`, High/Ultra load the full-res originals. `starmap.jpg` and the relief
+  maps are exempt (stars alias away when downscaled; Low skips relief entirely).
+  The tiers are optional: if a tier directory is absent, the loader falls back
+  to the original, so the app is visually identical with or without the bake.
 - Every texture is optional: if a file under `public/textures/` is missing,
   that body falls back to a fully procedural look.
 
