@@ -61,7 +61,61 @@ function eclipticToSaturnFrame(): Matrix4 {
   return new Matrix4().makeBasis(x, y, z).transpose();
 }
 
-const ECL_TO_SATURN = eclipticToSaturnFrame();
+/**
+ * Rotation taking ecliptic (Y-up scene) vectors into Saturn's equatorial
+ * frame. Exported for the irregular-satellite frame conversion (Phoebe, F11.1),
+ * whose JPL mean elements are referred to the ecliptic while `data/saturn.ts`
+ * stores everything in Saturn's equatorial frame.
+ */
+export const ECL_TO_SATURN = eclipticToSaturnFrame();
+
+/** Orbit-orientation angles (degrees). a/e/M0/period are frame-independent. */
+export interface OrbitOrientation {
+  iDeg: number;
+  nodeDeg: number;
+  periDeg: number;
+}
+
+// z-up reference frame (the frame kepler.ts uses before its scene mapping)
+// ↔ scene Y-up mapping. kepler maps ref (a,b,c) → scene (a, c, −b).
+const refToScene = (v: Vector3): Vector3 => new Vector3(v.x, v.z, -v.y);
+const sceneToRef = (v: Vector3): Vector3 => new Vector3(v.x, -v.z, v.y);
+
+/**
+ * Convert an orbit's orientation (inclination, ascending node, argument of
+ * periapsis) from the ecliptic reference frame to Saturn's equatorial frame.
+ *
+ * JPL SSD lists irregular satellites (Phoebe) in the ecliptic; copying i≈175°
+ * straight into the equatorial table would mis-orient the plane by Saturn's
+ * ~26.7° obliquity. We build the periapsis (P) and orbit-normal (W) unit
+ * vectors, rotate them through ECL_TO_SATURN, then re-extract the three angles —
+ * the node moves, so the argument of periapsis is recomputed from the *new*
+ * node (gotcha §15). a, e, M0 and the period are unchanged by a pure rotation.
+ */
+export function eclipticOrbitToSaturnFrame(o: OrbitOrientation): OrbitOrientation {
+  const i = o.iDeg * DEG, O = o.nodeDeg * DEG, w = o.periDeg * DEG;
+  const cO = Math.cos(O), sO = Math.sin(O);
+  const ci = Math.cos(i), si = Math.sin(i);
+  const cw = Math.cos(w), sw = Math.sin(w);
+  // Standard perifocal → reference unit vectors (ecliptic z-up frame).
+  const P = new Vector3(cO * cw - sO * sw * ci, sO * cw + cO * sw * ci, sw * si);
+  const W = new Vector3(sO * si, -cO * si, ci); // orbit normal (ang. momentum)
+  // Rotate both into Saturn's equatorial frame via the scene-vector matrix.
+  const Ps = sceneToRef(refToScene(P).applyMatrix4(ECL_TO_SATURN));
+  const Ws = sceneToRef(refToScene(W).applyMatrix4(ECL_TO_SATURN));
+  // Re-extract angles. i' from the normal's z; node from n = ẑ × W = (−Wy,Wx,0).
+  const iOut = Math.acos(Math.max(-1, Math.min(1, Ws.z)));
+  const n = new Vector3(-Ws.y, Ws.x, 0);
+  const nodeOut = Math.atan2(n.y, n.x);
+  const nLen = n.length();
+  const nHat = nLen > 1e-9 ? n.clone().multiplyScalar(1 / nLen) : new Vector3(1, 0, 0);
+  // In-plane basis at the node: nHat, and bHat = W × nHat (direction of motion,
+  // so ω is signed correctly for retrograde orbits too). P = cosω·n̂ + sinω·b̂.
+  const bHat = new Vector3().crossVectors(Ws, nHat);
+  const periOut = Math.atan2(Ps.dot(bHat), Ps.dot(nHat));
+  const norm = (r: number): number => (((r / DEG) % 360) + 360) % 360;
+  return { iDeg: iOut / DEG, nodeDeg: norm(nodeOut), periDeg: norm(periOut) };
+}
 
 /** Unit vector pointing from Saturn toward the Sun, scene frame. */
 export function sunDirectionAt(jd: number, out = new Vector3()): Vector3 {

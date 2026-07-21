@@ -19,7 +19,7 @@ import {
   solarAtmosphereTint, sunVisibilityFromCamera,
 } from './physics/eclipse.ts';
 import { solarTintUniform } from './scene/Sun.ts';
-import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
+import { KM_PER_UNIT, MINOR_MOONS, MOONS, SATURN } from './data/saturn.ts';
 import { Hud, SPEED_VALUES } from './ui/hud.ts';
 import { BodyLabels, occludedBySaturn } from './ui/labels.ts';
 import { Cinema } from './ui/cinema.ts';
@@ -115,7 +115,9 @@ async function boot(): Promise<void> {
     controls.controls.rotateSpeed = fov / FOV_DEFAULT;
   };
 
-  const allBodies = [SATURN, ...MOONS];
+  // Majors drive the shadow slots / glare gating; minors (incl. Phoebe) are
+  // focusable, labelled and listed but claim no shadow slot (F11.1).
+  const allBodies = [SATURN, ...MOONS, ...MINOR_MOONS];
   const byId = new Map(allBodies.map((b) => [b.id, b]));
 
   // --- F8.3 shareable URL: write current pose with a 1 Hz throttle ----------

@@ -165,8 +165,15 @@ function titanSurface(): MeshStandardNodeMaterial {
   return m;
 }
 
+function phoebe(): MeshStandardNodeMaterial {
+  // Very dark (albedo ~0.08 ⚠ VERIFICAR), heavily cratered captured body —
+  // slightly warmer than neutral. Deeper crater carving than the icy moons.
+  return makeMoonMaterial(icyBase([0.095, 0.088, 0.082], 6, 0.4, 0.3));
+}
+
 const BUILDERS: Record<string, () => MeshStandardNodeMaterial> = {
   mimas, enceladus, tethys, dione, rhea, iapetus, hyperion, titan: titanSurface,
+  phoebe,
 };
 
 /**

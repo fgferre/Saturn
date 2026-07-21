@@ -17,7 +17,7 @@ import type { BodyDefinition } from '../orbital/types.ts';
 import {
   elementsToPosition, meanAnomalyAt, orbitalAngleAt, sampleOrbit,
 } from '../orbital/kepler.ts';
-import { KM_PER_UNIT, MOONS, SATURN } from '../data/saturn.ts';
+import { KM_PER_UNIT, MINOR_MOONS, MOONS, SATURN } from '../data/saturn.ts';
 import { createRingProfile, type RingProfile } from '../materials/ringProfile.ts';
 import type { BodyMaps } from '../materials/textures.ts';
 import { createRingsMaterial } from '../materials/ringsMaterial.ts';
@@ -272,6 +272,31 @@ export class SaturnSystem {
         this.plumeSystems.push(plumes);
       }
     }
+
+    // --- Minor moons + Phoebe (F11.1) ---
+    // No shadow slots (MOON_SHADOW_COUNT stays 8) and no LOD swapping — they
+    // still darken/redden in the umbra via eclipseLight/eclipseTint and draw
+    // orbit lines. Placeholder shared sphere for now; the ravioli/irregular/
+    // Phoebe silhouettes land in F11.1b. Phoebe gets a dark builder material.
+    for (const def of MINOR_MOONS) {
+      const radius = toUnits(def.physical.radiusKm);
+      const eclipseLight = uniform(1);
+      const eclipseTint = uniform(new Vector3(1, 1, 1));
+      const mesh = new Mesh(
+        this.moonGeomLow,
+        createMoonMaterial(def.id, null, eclipseTint),
+      );
+      mesh.scale.setScalar(radius);
+      const anchor = new Object3D();
+      anchor.add(mesh);
+      this.group.add(anchor);
+      this.bodies.set(def.id, { def, anchor, mesh, eclipseLight, eclipseTint });
+
+      const line = orbitLine(def);
+      line.visible = false;
+      this.orbitLines.push(line);
+      this.group.add(line);
+    }
   }
 
   setOrbitsVisible(visible: boolean): void {
@@ -407,6 +432,34 @@ export class SaturnSystem {
             solarAtmosphereTint(body.anchor.position, sunDir, body.eclipseTint.value)
               .multiplyScalar(scalar);
           }
+        }
+      }
+    }
+
+    // Minor moons + Phoebe: positioned + eclipsed like the majors, but they
+    // never touch the shadow slots (slot count is exactly MOON_SHADOW_COUNT).
+    for (const def of MINOR_MOONS) {
+      const body = this.bodies.get(def.id)!;
+      const p = elementsToPosition(def.elements!, jd);
+      body.anchor.position.set(toUnits(p.x), toUnits(p.y), toUnits(p.z));
+
+      if (def.physical.tidallyLocked) {
+        body.mesh.rotation.y = orbitalAngleAt(def.elements!, jd) + Math.PI;
+      } else if (def.physical.rotationPeriodH) {
+        // First non-synchronous uniform rotator (Phoebe, 9.27 h). Wrapped to
+        // keep f32 precision over long time scrubs.
+        body.mesh.rotation.y =
+          (((jd * 24) / def.physical.rotationPeriodH) * Math.PI * 2) % (Math.PI * 2);
+      }
+
+      if (sunDir && body.eclipseLight) {
+        const scalar = saturnShadowOnMoon(
+          body.anchor.position, sunDir, this.ringProfile.opacityAt,
+        );
+        body.eclipseLight.value = scalar;
+        if (body.eclipseTint) {
+          solarAtmosphereTint(body.anchor.position, sunDir, body.eclipseTint.value)
+            .multiplyScalar(scalar);
         }
       }
     }
