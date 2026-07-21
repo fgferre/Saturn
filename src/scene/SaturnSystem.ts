@@ -81,7 +81,7 @@ function ringGeometry(profile: RingProfile): RingGeometry {
 }
 
 function hyperionGeometry(): IcosahedronGeometry {
-  const geo = new IcosahedronGeometry(1, 5);
+  const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
   const dent = new Vector3(0.7, 0.2, 0.68).normalize();
@@ -106,7 +106,7 @@ function hyperionGeometry(): IcosahedronGeometry {
  * Atlas ~41×35×19 km (Thomas et al. 2018, Cassini).
  */
 function ravioliGeometry(): IcosahedronGeometry {
-  const geo = new IcosahedronGeometry(1, 4);
+  const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
   for (let i = 0; i < pos.count; i++) {
@@ -134,7 +134,7 @@ function ravioliGeometry(): IcosahedronGeometry {
  * as clones. Elongated along local X (Prometheus is ~2:1: 136×79×59 km).
  */
 function irregularMoonGeometry(seed: number): IcosahedronGeometry {
-  const geo = new IcosahedronGeometry(1, 4);
+  const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
   for (let i = 0; i < pos.count; i++) {
@@ -152,7 +152,7 @@ function irregularMoonGeometry(seed: number): IcosahedronGeometry {
  * oblate, gentle cratered texture; the dark albedo comes from its material.
  */
 function phoebeGeometry(): IcosahedronGeometry {
-  const geo = new IcosahedronGeometry(1, 4);
+  const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
   for (let i = 0; i < pos.count; i++) {
