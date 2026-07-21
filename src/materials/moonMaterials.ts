@@ -19,6 +19,7 @@ import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
 import { MoonNodeMaterial, type HapkeParams } from './hapke.ts';
 import { DirectMaskedStandardMaterial } from './directMaskedLighting.ts';
+import { seasonalTiltUniform } from './sharedUniforms.ts';
 import type { MoonRelief } from './textures.ts';
 
 type NodeObj = ShaderNodeObject<Node>;
@@ -134,8 +135,22 @@ function titanSurface(): MeshStandardNodeMaterial {
   const p = normalize(positionLocal);
   const lat = p.y;
   let color: NodeObj = mix(vec3(0.66, 0.40, 0.13), vec3(0.52, 0.29, 0.09), smoothstep(-0.2, 0.9, lat));
-  // North polar hood: darker, slightly bluish collar.
-  color = mix(color, vec3(0.45, 0.38, 0.28), smoothstep(0.72, 0.95, lat).mul(0.5));
+  // Seasonal polar hood: the detached haze cap sits over the WINTER pole and
+  // migrates north↔south as Saturn's seasons turn, lagging insolation by ~2 yr
+  // (West et al. 2016; Cassini ISS 2004–2017 recorded the cap's decay in the
+  // spring hemisphere and its rebuild in the autumn one). Reuses the same
+  // lagged forcing that grades Saturn's globe (F9.3): +value ⇒ north in winter.
+  const forcing = seasonalTiltUniform;
+  const AXIAL = float(0.4499); // ⚠ VERIFICAR: sin(Saturn obliquity 26.73°)
+  // Winter-pole weight fades continuously through equinox as the sign flips.
+  // ⚠ VERIFICAR: transition sharpness (forcing/AXIAL is a linear proxy; the
+  // true cap turnover timescale is unpublished — West et al. 2016).
+  const northWinter = clamp(forcing.div(AXIAL), 0, 1);
+  const southWinter = clamp(forcing.negate().div(AXIAL), 0, 1);
+  const northHood = smoothstep(0.72, 0.95, lat).mul(northWinter);
+  const southHood = smoothstep(0.72, 0.95, lat.negate()).mul(southWinter);
+  const hood = clamp(northHood.add(southHood), 0, 1);
+  color = mix(color, vec3(0.45, 0.38, 0.28), hood.mul(0.5));
   // Extremely soft banding.
   const band = mx_noise_float(vec3(mul(lat, 6.0), 3.3, 7.7), 1.0).mul(0.05);
   color = color.add(band);
