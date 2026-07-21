@@ -8,7 +8,9 @@ import { createSky, createStarfield, followCamera } from './scene/Starfield.ts';
 import { Sun } from './scene/Sun.ts';
 import { loadAllMaps } from './materials/textures.ts';
 import { FocusControls } from './camera/FocusControls.ts';
-import { sunDirectionAt } from './data/sunDirection.ts';
+import {
+  SATURN_MEAN_DISTANCE_AU, saturnSunDistanceAU, sunDirectionAt,
+} from './data/sunDirection.ts';
 import {
   eRingVisUniform, edgeOnUniform, slabVisUniform, sunDirUniform,
   sunVisibilityUniform,
@@ -421,6 +423,11 @@ async function boot(): Promise<void> {
 
     sunDirectionAt(clock.jd, sunDir);
     sunDirUniform.value.copy(sunDir);
+    // S35 — heliocentric distance (9.02–10.05 AU) drives solar irradiance and
+    // apparent size. distanceScale = mean/r: light + disk radiance ∝ its square,
+    // disk diameter ∝ itself. Applied in sun.update below.
+    const solarDistanceScale =
+      SATURN_MEAN_DISTANCE_AU / saturnSunDistanceAU(clock.jd);
 
     // 1) Bodies first, 2) final camera pose, 3) sun/sky on that pose, 4) render.
     // (Onda 3 B2: never place the disk/sky before controls.update.)
@@ -449,6 +456,7 @@ async function boot(): Promise<void> {
     }
 
     // Shared infinite direction: disk, seed, DirectionalLight, occlusion gate.
+    sun.setDistanceScale(solarDistanceScale);
     sun.update(sunDir, camera.position);
     followCamera(sky, camera.position);
 

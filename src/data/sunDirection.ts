@@ -10,6 +10,13 @@ import { SATURN_HELIOCENTRIC, SATURN_POLE } from './saturn.ts';
 
 const DEG = Math.PI / 180;
 const OBLIQUITY = 23.43928 * DEG; // Earth obliquity: ICRF equatorial -> ecliptic
+const AU_KM = 149597870.7; // 1 astronomical unit in km
+
+/**
+ * Saturn's mean heliocentric distance (semi-major axis), AU. The reference for
+ * the (mean/r)² irradiance and mean/r apparent-size scaling; irradiance = 1 here.
+ */
+export const SATURN_MEAN_DISTANCE_AU = SATURN_HELIOCENTRIC.aKm / AU_KM;
 
 /** Saturn's pole as a unit vector in ecliptic coordinates (Y-up scene style). */
 function saturnPoleEcliptic(): Vector3 {
@@ -62,6 +69,17 @@ export function sunDirectionAt(jd: number, out = new Vector3()): Vector3 {
   // Saturn position (ecliptic, Y-up scene mapping); Sun is the opposite way.
   out.set(-p.x, -p.y, -p.z).normalize();
   return out.applyMatrix4(ECL_TO_SATURN);
+}
+
+/**
+ * Saturn's heliocentric distance at jd, AU. Varies ≈9.02 (perihelion) to
+ * ≈10.05 (aphelion) over the 29.5 yr orbit (e≈0.054), swinging solar
+ * irradiance ×1.24 peak-to-peak and the Sun's apparent diameter ±5.5%.
+ * Complements sunDirectionAt, which normalizes this distance away.
+ */
+export function saturnSunDistanceAU(jd: number): number {
+  const p = elementsToPosition(SATURN_HELIOCENTRIC, jd);
+  return Math.hypot(p.x, p.y, p.z) / AU_KM;
 }
 
 /**

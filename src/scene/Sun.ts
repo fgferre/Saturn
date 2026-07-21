@@ -76,6 +76,17 @@ export const SUN_DISK_UV_RADIUS = 0.5 / DISK_PAD;
  */
 export const solarTintUniform = uniform(new Vector3(1, 1, 1));
 
+/** DirectionalLight intensity at Saturn's mean heliocentric distance. */
+export const SUN_LIGHT_INTENSITY = 3.4;
+
+/**
+ * Heliocentric irradiance factor (mean/r)², 1 at the mean distance and updated
+ * per frame from main. Multiplies the disk's display radiance ONLY — kept
+ * separate from SUN_DISPLAY_RADIANCE (the wave4 AgX anchors assert 90 at the
+ * mean distance, so the constant must stay 90 and this must default to 1).
+ */
+export const solarIrradianceUniform = uniform(1);
+
 export class Sun {
   readonly group = new Group();
   readonly light: DirectionalLight;
@@ -85,8 +96,9 @@ export class Sun {
   readonly seed: Mesh;
 
   constructor() {
-    // Sole direct light for the whole system (warm ~5800 K-ish).
-    this.light = new DirectionalLight(0xfff1e0, 3.4);
+    // Sole direct light for the whole system (warm ~5800 K-ish). Intensity is
+    // the mean-distance value; update() scales it by (mean/r)² each frame.
+    this.light = new DirectionalLight(0xfff1e0, SUN_LIGHT_INTENSITY);
     this.group.add(this.light);
     this.group.add(this.light.target);
     // F7.3: no AmbientLight — night is ringshine / saturnshine only.
@@ -117,6 +129,7 @@ export class Sun {
       material.colorNode = photosphere
         .mul(limb)
         .mul(SUN_DISPLAY_RADIANCE)
+        .mul(solarIrradianceUniform)
         .mul(solarTintUniform)
         .mul(sunVisibilityUniform)
         .mul(diskMask);
@@ -162,6 +175,19 @@ export class Sun {
       this.seed.layers.set(SOLAR_LAYER);
       this.group.add(this.seed);
     }
+  }
+
+  /**
+   * Apply the heliocentric distance scaling for the frame. `distanceScale =
+   * mean/r`: irradiance (light + disk radiance) scales by its square, the disk's
+   * apparent diameter linearly — so the Sun is brighter and larger at perihelion.
+   * The seed's glare footprint stays fixed (it represents a point source).
+   */
+  setDistanceScale(distanceScale: number): void {
+    const irradiance = distanceScale * distanceScale;
+    this.light.intensity = SUN_LIGHT_INTENSITY * irradiance;
+    solarIrradianceUniform.value = irradiance;
+    this.disk.scale.setScalar(SUN_DISK_SCALE * distanceScale);
   }
 
   /**
