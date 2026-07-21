@@ -36,6 +36,11 @@ import { quality } from './quality.ts';
 /** Post A/B modes for QA (`?post=`). `anamorphic` kept as alias of full solar glow. */
 export type PostMode = 'raw' | 'bloom' | 'anamorphic' | 'flare' | 'full';
 
+/** Handle returned by `addCompute`; flip `enabled` to gate a compute pass. */
+export interface ComputeHandle {
+  enabled: boolean;
+}
+
 function postModeFromUrl(): PostMode {
   const v = new URLSearchParams(location.search).get('post');
   if (v === 'raw' || v === 'bloom' || v === 'anamorphic' || v === 'flare' || v === 'full') {
@@ -186,13 +191,13 @@ export class Engine {
     const forceWebGL = new URLSearchParams(location.search).has('webgl');
     // No canvas antialias: MSAA happens on the scene pass (see constructor),
     // so the final quad present skips a useless 4x multisample+resolve.
-    const renderer = new WebGPURenderer({ forceWebGL });
+    const renderer = new WebGPURenderer({ forceWebGL, powerPreference: 'high-performance' });
     await renderer.init();
     return new Engine(renderer, container);
   }
 
   private capturing = false;
-  private readonly computes: object[] = [];
+  private readonly computes: { node: object; enabled: boolean }[] = [];
 
   /**
    * Keep bloom/solar cameras pose-identical to the base camera.
@@ -203,9 +208,15 @@ export class Engine {
     copyCameraPose(this.camera, this.solarCamera);
   }
 
-  /** Register a compute pass to run every frame (GPU particles etc.). */
-  addCompute(node: object): void {
-    this.computes.push(node);
+  /**
+   * Register a compute pass to run every frame (GPU particles etc.).
+   * Returns a handle whose `enabled` flag gates the pass (start/renderOnce
+   * skip disabled passes — the frame cost drops to zero when off-screen).
+   */
+  addCompute(node: object): ComputeHandle {
+    const entry = { node, enabled: true };
+    this.computes.push(entry);
+    return entry;
   }
 
   /** Run a compute pass once, now (initialization kernels). */
@@ -223,7 +234,7 @@ export class Engine {
       last = now;
       cb(dt);
       this.syncAuxCameras();
-      for (const n of this.computes) this.renderer.compute(n as never);
+      for (const c of this.computes) if (c.enabled) this.renderer.compute(c.node as never);
       this.post.render();
     });
   }
@@ -231,7 +242,7 @@ export class Engine {
   /** Render a single frame outside the rAF loop (headless testing). */
   async renderOnce(): Promise<void> {
     this.syncAuxCameras();
-    for (const n of this.computes) await this.renderer.computeAsync(n as never);
+    for (const c of this.computes) if (c.enabled) await this.renderer.computeAsync(c.node as never);
     await this.post.renderAsync();
   }
 

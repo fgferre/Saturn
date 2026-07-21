@@ -37,10 +37,16 @@ async function boot(): Promise<void> {
     if (bootStatus) bootStatus.textContent = `Loading Cassini maps… ${d}/${t}`;
   });
   const system = new SaturnSystem(maps);
-  // GPU particle systems: seed once, then integrate every frame.
+  // GPU particle systems: seed once, then integrate every frame — but only
+  // while the camera is near Enceladus (F8.5 cost gate). The compute handle
+  // lets the frame loop flip the pass on/off.
+  const plumeGates: {
+    p: (typeof system.plumeSystems)[number];
+    handle: ReturnType<typeof engine.addCompute>;
+  }[] = [];
   for (const p of system.plumeSystems) {
     await engine.computeOnce(p.init);
-    engine.addCompute(p.update);
+    plumeGates.push({ p, handle: engine.addCompute(p.update) });
   }
   const sun = new Sun();
   // Real NASA starmap sky when available, procedural starfield otherwise.
@@ -142,6 +148,17 @@ async function boot(): Promise<void> {
   const sunDir = new Vector3();
   const camDist = new Vector3();
   const infoScratch = new Vector3();
+  const enceladusPos = new Vector3();
+  // F8.5 plume gate: integrate the geysers only when the camera is within
+  // NEAR units of Enceladus. WARM-UP TRAP — the opening camera sits ≥92 u
+  // away, so the compute is born disabled and the particles are frozen at the
+  // seed. On the rising edge (camera arrives) run a burst of steps spread over
+  // a few frames so the plume is already in steady state, never an "eruption
+  // beginning". Lives are 5–10 s, staggered down to −9 s, so ~150 steps at the
+  // frame dt cap (0.1 s) covers a full spawn cycle plus margin.
+  const PLUME_NEAR = 40;
+  let plumeWasNear = false;
+  let plumeWarmup = 0;
   const solarTintScratch = new Vector3(1, 1, 1);
   /** Moon disks for solar-eclipse glare gating (rebuilt each frame). */
   const moonDisks: { pos: Vector3; radius: number }[] = MOONS.map(() => ({
@@ -169,6 +186,26 @@ async function boot(): Promise<void> {
     system.update(clock.jd, sunDir);
     controls.update(dt);
     cinema.update(dt);
+
+    // F8.5 — gate the Enceladus plume compute + sprite by camera distance.
+    const plumeNear =
+      system.getBodyPosition('enceladus', enceladusPos).distanceTo(camera.position)
+        < PLUME_NEAR;
+    if (plumeNear && !plumeWasNear) plumeWarmup = 150; // rising edge: warm up
+    plumeWasNear = plumeNear;
+    for (const g of plumeGates) g.handle.enabled = plumeNear;
+    for (const p of system.plumeSystems) p.mesh.visible = plumeNear;
+    if (plumeWarmup > 0) {
+      // Advance the sim toward steady state, ~25 steps/frame, at the dt cap so
+      // a full spawn cycle is covered in a handful of frames (imperceptible).
+      const steps = Math.min(25, plumeWarmup);
+      for (const p of system.plumeSystems) p.dt.value = 0.1;
+      for (let s = 0; s < steps; s++) {
+        for (const g of plumeGates) engine.renderer.compute(g.p.update as never);
+      }
+      plumeWarmup -= steps;
+      for (const p of system.plumeSystems) p.dt.value = dt; // restore real dt
+    }
 
     // Shared infinite direction: disk, seed, DirectionalLight, occlusion gate.
     sun.update(sunDir, camera.position);
@@ -231,6 +268,11 @@ async function boot(): Promise<void> {
       Math.abs(camR - 238) / 90, Math.abs(camera.position.y) / 25,
     );
     eRingVisUniform.value = Math.min(1, eRingProximity);
+
+    // F8.5 — skip the slab/E-ring draw entirely when their fade uniform is
+    // ~zero (opacity would be invisible anyway; this drops the vertex work).
+    system.slabMesh.visible = slabVisUniform.value > 0.01;
+    system.eRingMesh.visible = eRingVisUniform.value > 0.01;
 
     hud.setDate(clock.date);
     // Refresh camera-distance stat cheaply (twice a second with the FPS meter).

@@ -102,6 +102,10 @@ export class SaturnSystem {
   readonly bodies = new Map<string, SystemBody>();
   readonly ringProfile: RingProfile;
   readonly plumeSystems: PlumeSystem[] = [];
+  /** Fly-through ring slab; `.visible` toggled per frame by slab proximity. */
+  readonly slabMesh: Mesh;
+  /** E-ring torus; `.visible` toggled per frame by E-ring proximity. */
+  readonly eRingMesh: Mesh;
   private readonly ringshine: Ringshine;
   private readonly orbitLines: Line[] = [];
   // High tessellation: real displacement needs vertices (limb silhouettes).
@@ -153,10 +157,12 @@ export class SaturnSystem {
     for (const strand of createFRing()) saturnAnchor.add(strand);
 
     // E ring: tenuous forward-scattering torus fed by Enceladus.
-    saturnAnchor.add(createERing());
+    this.eRingMesh = createERing();
+    saturnAnchor.add(this.eRingMesh);
 
     // Volumetric fly-through slab (fades in near the ring plane).
-    saturnAnchor.add(createRingSlab(this.ringProfile.texture, quality.slabCount));
+    this.slabMesh = createRingSlab(this.ringProfile.texture, quality.slabCount);
+    saturnAnchor.add(this.slabMesh);
 
     // Edge-on rim: from grazing angles the infinitely thin plane vanishes;
     // this faint ribbon at the A-ring outer edge keeps a bright line alive.
