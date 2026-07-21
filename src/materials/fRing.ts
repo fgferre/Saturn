@@ -12,10 +12,10 @@
 import { AdditiveBlending, DoubleSide, Mesh, PlaneGeometry } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  cameraPosition, clamp, cos, dot, float, mix, mx_noise_float, normalize,
-  oneMinus, positionWorld, pow, sin, uv, vec3,
+  atan, cameraPosition, clamp, cos, dot, float, mix, mx_noise_float, normalize,
+  oneMinus, positionWorld, pow, sin, smoothstep, uv, vec3,
 } from 'three/tsl';
-import { spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
+import { prometheusLonUniform, spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
 import { planetShadow } from './planetShadow.ts';
 import { KM_PER_UNIT } from '../data/saturn.ts';
 
@@ -51,6 +51,23 @@ export function createFRing(): Mesh[] {
     const bent = vec3(r.mul(cos(theta)), 0.0, r.mul(sin(theta)).negate());
     material.positionNode = bent;
 
+    // Prometheus streamer-channels (F11.2b, PIA08397). Prometheus orbits
+    // interior to the F ring (faster), so each pass draws dark channels that
+    // TRAIL behind the moon in longitude, decaying over a few tens of degrees
+    // (Murray et al. 2008). The moon's scene azimuth arrives as
+    // prometheusLonUniform (= -orbitalAngle); this sample's scene azimuth is
+    // -theta (bent = (r·cosθ, 0, -r·sinθ) ⇒ atan(z,x) = -θ).
+    const dLon = theta.negate().sub(prometheusLonUniform);
+    const phi = atan(sin(dLon), cos(dLon)); // wrapped to (-π, π], seamless at 2π
+    const CH_SIGMA = 0.55; // azimuthal decay (rad); channels visible to ~50° trailing
+    const q = phi.div(CH_SIGMA);
+    const trailEnv = q.mul(q).negate().exp() // exp(-(φ/σ)²)
+      .mul(smoothstep(float(-0.02), float(0.02), phi)); // gate to φ>0 (trailing only)
+    // Discrete periodic channels combed out along the trailing wake.
+    const channels = sin(phi.mul(52)).mul(0.5).add(0.5); // 0..1 comb
+    // Darken (carve) the strand periodically within the trailing envelope.
+    const channelMask = oneMinus(trailEnv.mul(channels).mul(0.72));
+
     // Clumps along the strand.
     const clump = mx_noise_float(
       vec3(cos(theta).mul(14).add(si * 3.1), sin(theta).mul(14), spokePhaseUniform.mul(0.3)),
@@ -71,8 +88,8 @@ export function createFRing(): Mesh[] {
     const shadow = planetShadow(positionWorld);
     material.colorNode = vec3(0.9, 0.92, 1.0)
       .mul(across).mul(fwd).mul(strand.brightness)
-      .mul(mix(float(0.4), float(1.6), clump)).mul(shadow);
-    material.opacityNode = across.mul(0.5).mul(clamp(fwd, 0.08, 1.0));
+      .mul(mix(float(0.4), float(1.6), clump)).mul(shadow).mul(channelMask);
+    material.opacityNode = across.mul(0.5).mul(clamp(fwd, 0.08, 1.0)).mul(channelMask);
 
     // High angular tessellation so the vertex-stage bend stays smooth.
     const geo = new PlaneGeometry(1, 1, 1024, 1);

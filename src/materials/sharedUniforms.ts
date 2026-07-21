@@ -29,6 +29,15 @@ export const spokePhaseUniform = uniform(0);
  */
 export const daphnisLonUniform = uniform(0);
 
+/**
+ * Prometheus' ring-frame azimuth (radians) — same convention as daphnisLonUniform
+ * (the NEGATIVE of the orbital angle, matching the Y-up scene azimuth atan(z,x)).
+ * Drives the F-ring "streamer-channels" (F11.2b): Prometheus is interior to the
+ * F ring (faster), so the channels it draws out trail BEHIND it in longitude
+ * (Murray et al. 2008). Updated once per frame in SaturnSystem.update.
+ */
+export const prometheusLonUniform = uniform(0);
+
 /** Cloud-advection phase for Saturn's zonal jets (sim-time driven, wraps). */
 export const cloudPhaseUniform = uniform(0);
 

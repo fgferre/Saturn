@@ -28,7 +28,7 @@ import { createEnceladusPlumes, type PlumeSystem } from '../effects/plumes.ts';
 import { createERing } from '../effects/eRing.ts';
 import {
   cloudPhaseUniform, daphnisLonUniform, edgeOnUniform, moonShadowUniforms,
-  plumeActivityUniform, seasonalTiltUniform, spokePhaseUniform,
+  plumeActivityUniform, prometheusLonUniform, seasonalTiltUniform, spokePhaseUniform,
 } from '../materials/sharedUniforms.ts';
 import { seasonalTilt } from '../data/season.ts';
 import { createFRing } from '../materials/fRing.ts';
@@ -472,6 +472,14 @@ export class SaturnSystem {
     const daphnis = MINOR_MOONS.find((m) => m.id === 'daphnis');
     if (daphnis?.elements) {
       daphnisLonUniform.value = -orbitalAngleAt(daphnis.elements, jd);
+    }
+
+    // Prometheus' ring-frame azimuth drives the F-ring streamer-channels (F11.2b),
+    // which trail behind the (faster, interior) moon. Same negated-angle scene
+    // convention as Daphnis; Prometheus has e=0/i=0 so this is exact.
+    const prometheus = MINOR_MOONS.find((m) => m.id === 'prometheus');
+    if (prometheus?.elements) {
+      prometheusLonUniform.value = -orbitalAngleAt(prometheus.elements, jd);
     }
 
     if (sunDir) this.ringshine.update(sunDir);
