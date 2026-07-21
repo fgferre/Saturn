@@ -316,6 +316,18 @@ export class Hud {
         <button type="button" class="hud-share" title="Copy a shareable link to this exact view" aria-label="Copy a shareable link">🔗 Share</button>
       </div>`;
     hud.appendChild(info);
+
+    // F12.2 — on narrow touch layouts the info panel is a bottom sheet (it used
+    // to vanish under 720px). This grip is display:none on desktop; on mobile it
+    // is the tap target that expands/collapses the sheet. Collapsed by default
+    // so it only occupies a slim strip (grip + body name) over the scene.
+    const grip = document.createElement('button');
+    grip.type = 'button';
+    grip.className = 'hud-sheet-grip';
+    grip.setAttribute('aria-label', 'Expand or collapse the info panel');
+    grip.addEventListener('click', () => info.classList.toggle('sheet-open'));
+    info.insertBefore(grip, info.firstChild);
+
     this.infoName = info.querySelector('h2')!;
     this.infoBlurb = info.querySelector('.blurb')!;
     this.infoStats = info.querySelector('.stats')!;

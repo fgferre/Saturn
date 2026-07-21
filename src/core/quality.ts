@@ -60,6 +60,21 @@ export function setBeforeReload(fn: () => void): void {
   beforeReload = fn;
 }
 
+/**
+ * F12.2 — touch phone / small tablet heuristic. Only consulted when the user
+ * has made no explicit choice (no `?quality`, nothing in localStorage), so a
+ * later manual pick (STORAGE_KEY) or auto-tune (TUNED_KEY) always wins on the
+ * next load. Mobile GPUs choke on the High default; start lighter and let the
+ * auto-tuner / dynamic-resolution controller take it the rest of the way.
+ */
+function isTouchMobile(): boolean {
+  try {
+    return navigator.maxTouchPoints > 0 && window.innerWidth < 900;
+  } catch {
+    return false;
+  }
+}
+
 function load(): QualityPreset {
   try {
     // QA: ?quality=<preset> pins a preset for this page load only — never
@@ -68,6 +83,10 @@ function load(): QualityPreset {
     if (pinned && PRESETS[pinned]) return PRESETS[pinned];
     const name = localStorage.getItem(STORAGE_KEY) as QualityName | null;
     if (name && PRESETS[name]) return PRESETS[name];
+    // No pin and no saved choice: on touch phones start on a light preset
+    // instead of the desktop High default. Not persisted — the first manual
+    // pick or auto-tune overrides it.
+    if (isTouchMobile()) return PRESETS.med;
   } catch { /* storage unavailable */ }
   return PRESETS.high;
 }
