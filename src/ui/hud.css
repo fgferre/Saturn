@@ -241,6 +241,78 @@
 .hud-photo:hover, .hud-share:hover { color: var(--hud-text); border-color: rgba(255,255,255,0.25); }
 .hud-photo:disabled { opacity: 0.5; cursor: default; }
 
+/* Help overlay — centered modal, toggled by '?'. Hidden until .show. */
+.hud-help {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.97);
+  width: min(320px, 82vw);
+  padding: 18px 22px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+}
+.hud-help.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
+}
+.hud-help h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+.hud-help h3 {
+  margin: 14px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+}
+.hud-help-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--hud-text);
+}
+.hud-help-grid .k {
+  justify-self: start;
+  border: 1px solid var(--hud-border);
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* First-visit hint — top center, fades out on first interaction. */
+.hud-hint {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 7px 15px;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: var(--hud-text);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s, transform 0.5s;
+}
+.hud-hint.show { opacity: 0.92; transform: translateX(-50%) translateY(0); }
+
 /* Transient status toast (Share → "Link copied"), above the time bar. */
 .hud-toast {
   position: absolute;

@@ -9,10 +9,29 @@ import type { BodyDefinition } from '../orbital/types.ts';
 
 const SATURN_R = SATURN.physical.radiusKm / KM_PER_UNIT;
 
+/**
+ * True when Saturn's globe sits between the camera and `bodyPos` (the body is
+ * hidden behind the planet). Saturn is at the origin; we test the closest
+ * approach of the camera→body segment to it. Shared by the label projector and
+ * click-to-focus picking (F8.7) so both hide/ignore the same occluded bodies.
+ */
+export function occludedBySaturn(camPos: Vector3, bodyPos: Vector3): boolean {
+  const dx = bodyPos.x - camPos.x;
+  const dy = bodyPos.y - camPos.y;
+  const dz = bodyPos.z - camPos.z;
+  const len2 = dx * dx + dy * dy + dz * dz;
+  if (len2 === 0) return false;
+  const t = -(camPos.x * dx + camPos.y * dy + camPos.z * dz) / len2;
+  if (t <= 0 || t >= 1) return false;
+  const cx = camPos.x + dx * t;
+  const cy = camPos.y + dy * t;
+  const cz = camPos.z + dz * t;
+  return Math.hypot(cx, cy, cz) < SATURN_R * 0.98;
+}
+
 export class BodyLabels {
   private readonly els = new Map<string, HTMLElement>();
   private readonly tmp = new Vector3();
-  private readonly camToBody = new Vector3();
   visible = true;
 
   constructor(bodies: BodyDefinition[], onClick: (id: string) => void) {
@@ -41,11 +60,9 @@ export class BodyLabels {
       if (id === focusedId) { el.classList.add('hidden'); continue; }
 
       const pos = getBodyPos(id, this.tmp);
-      this.camToBody.copy(pos).sub(camera.position);
-      const dist = this.camToBody.length();
 
       // Occlusion by Saturn's globe (skip for Saturn's own label).
-      if (id !== 'saturn' && this.occludedBySaturn(camera.position, dist)) {
+      if (id !== 'saturn' && occludedBySaturn(camera.position, pos)) {
         el.classList.add('hidden');
         continue;
       }
@@ -61,16 +78,5 @@ export class BodyLabels {
       el.style.left = `${x.toFixed(1)}px`;
       el.style.top = `${y.toFixed(1)}px`;
     }
-  }
-
-  private occludedBySaturn(camPos: Vector3, bodyDist: number): boolean {
-    // Saturn sits at the origin. Closest approach of the cam->body segment to it:
-    const d = this.camToBody; // already bodyPos - camPos
-    const t = -camPos.dot(d) / (bodyDist * bodyDist);
-    if (t <= 0 || t >= 1) return false;
-    const cx = camPos.x + d.x * t;
-    const cy = camPos.y + d.y * t;
-    const cz = camPos.z + d.z * t;
-    return Math.hypot(cx, cy, cz) < SATURN_R * 0.98;
   }
 }

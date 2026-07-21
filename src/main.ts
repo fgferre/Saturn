@@ -19,10 +19,11 @@ import {
 import { solarTintUniform } from './scene/Sun.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
 import { Hud, SPEED_VALUES } from './ui/hud.ts';
-import { BodyLabels } from './ui/labels.ts';
+import { BodyLabels, occludedBySaturn } from './ui/labels.ts';
 import { Cinema } from './ui/cinema.ts';
 import { autoTuneDown, quality, setBeforeReload } from './core/quality.ts';
 import {
+  FOV_DEFAULT, FOV_MAX, FOV_MIN,
   offsetToSpherical, parseState, serializeState, sphericalToOffset,
   type UrlState,
 } from './core/urlState.ts';
@@ -101,6 +102,17 @@ async function boot(): Promise<void> {
   // Saturn deserves a wider default framing than a moon.
   controls.controls.minDistance = getRadius('saturn') * 1.35;
 
+  // F8.7 — FOV / telephoto. Set the base camera's lens (copyCameraPose then
+  // propagates it to the bloom/solar cameras each frame). Rotate speed scales
+  // with the lens so a long lens pans slowly for the same drag, like a real
+  // telephoto. Callers schedule the URL write themselves.
+  const applyFov = (deg: number): void => {
+    const fov = Math.max(FOV_MIN, Math.min(FOV_MAX, deg));
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+    controls.controls.rotateSpeed = fov / FOV_DEFAULT;
+  };
+
   const allBodies = [SATURN, ...MOONS];
   const byId = new Map(allBodies.map((b) => [b.id, b]));
 
@@ -113,6 +125,7 @@ async function boot(): Promise<void> {
       camera.position.y - urlBodyScratch.y,
       camera.position.z - urlBodyScratch.z,
     );
+    cam.fov = camera.fov;
     return { focus: controls.focusId, jd: clock.jd, speed: clock.speed, cam };
   };
   const writeUrl = (): void => {
@@ -204,6 +217,7 @@ async function boot(): Promise<void> {
       controls.controls.autoRotateSpeed = 0.12;
     },
     onExposure: (v) => { engine.renderer.toneMappingExposure = v; },
+    onFov: (v) => { applyFov(v); scheduleUrlWrite(); },
     onCinema: () => cinema.enter(),
     onPhoto: savePhoto,
   });
@@ -230,6 +244,11 @@ async function boot(): Promise<void> {
     }
     hud.setFocused(id);
     hud.setInfo(byId.get(id)!);
+  }
+  // F8.7 — restore the shared lens (4th cam component). Independent of focus.
+  if (initialUrl.cam?.fov !== undefined) {
+    applyFov(initialUrl.cam.fov);
+    hud.setFov(camera.fov);
   }
 
   // --- Global keyboard shortcuts (Esc handled inside Cinema) ---
@@ -266,7 +285,56 @@ async function boot(): Promise<void> {
         if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
         else document.exitFullscreen?.();
         break;
+      case '?': // Toggle the keyboard/mouse help overlay.
+        e.preventDefault();
+        hud.toggleHelp();
+        break;
+      case 'Escape': // Close help if it's open (Cinema owns Esc otherwise).
+        if (hud.helpOpen) { e.preventDefault(); hud.closeHelp(); }
+        break;
     }
+  });
+
+  // --- F8.7 click-to-focus (picking) ---------------------------------------
+  // A click that didn't drag (< DRAG_SLOP px) projects every body centre to the
+  // screen and focuses the nearest one under the cursor. Hit radius is the
+  // larger of a fixed pixel pad and the body's projected radius, so tiny distant
+  // moons are still clickable while a close globe is picked across its whole
+  // disk. Bodies hidden behind Saturn are ignored (same test as the labels).
+  const canvas = engine.renderer.domElement;
+  const DRAG_SLOP = 5;
+  const HIT_PAD = 24;
+  const pickScratch = new Vector3();
+  let downX = 0;
+  let downY = 0;
+  const pickAt = (px: number, py: number, rect: DOMRect): void => {
+    // Mid-flight the pose is interpolated (controls disabled) — don't hijack it.
+    if (!controls.controls.enabled) return;
+    const halfH = rect.height / 2;
+    const tanHalfFov = Math.tan((camera.fov * Math.PI) / 360);
+    let bestId: string | null = null;
+    let bestD = Infinity;
+    for (const def of allBodies) {
+      const id = def.id;
+      if (id === controls.focusId) continue; // already framed
+      const world = getPos(id, pickScratch);
+      const dist = world.distanceTo(camera.position);
+      if (id !== 'saturn' && occludedBySaturn(camera.position, world)) continue;
+      world.project(camera); // mutates pickScratch → NDC
+      if (pickScratch.z > 1) continue; // behind the camera
+      const sx = (pickScratch.x * 0.5 + 0.5) * rect.width;
+      const sy = (-pickScratch.y * 0.5 + 0.5) * rect.height;
+      const d = Math.hypot(sx - px, sy - py);
+      const projRadius = (getRadius(id) / (dist * tanHalfFov)) * halfH;
+      if (d <= Math.max(HIT_PAD, projRadius) && d < bestD) { bestD = d; bestId = id; }
+    }
+    if (bestId) focusBody(bestId);
+  };
+  canvas.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
+  canvas.addEventListener('pointerup', (e) => {
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) >= DRAG_SLOP) return; // was a drag
+    const rect = canvas.getBoundingClientRect();
+    pickAt(e.clientX - rect.left, e.clientY - rect.top, rect);
   });
 
   const sunDir = new Vector3();

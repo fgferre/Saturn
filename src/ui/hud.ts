@@ -3,6 +3,7 @@
 import './hud.css';
 import { dateToJD, J2000, type BodyDefinition } from '../orbital/types.ts';
 import { PRESETS, quality, setQuality, type QualityName } from '../core/quality.ts';
+import { FOV_DEFAULT, FOV_MAX, FOV_MIN } from '../core/urlState.ts';
 
 /** Date-picker validity window — J2000 ± 200 Julian years (matches urlState). */
 const JD_HALF_SPAN = 200 * 365.25;
@@ -18,6 +19,8 @@ export interface HudCallbacks {
   onToggleLabels(v: boolean): void;
   onToggleDrift(v: boolean): void;
   onExposure(v: number): void;
+  /** Change the camera field of view (degrees, telephoto ↔ wide). */
+  onFov(v: number): void;
   onCinema(): void;
   /** Capture + download a high-res PNG; the button stays disabled until it settles. */
   onPhoto(): void | Promise<void>;
@@ -67,6 +70,28 @@ const DEFAULT_SPEED = 3600;
 /** Ordered preset values — shared with the keyboard `[`/`]` speed stepper. */
 export const SPEED_VALUES: number[] = SPEEDS.map((s) => s.value);
 
+/**
+ * Single source of truth for the help overlay AND the first-visit hint. The
+ * global keyboard handler in main.ts owns the actual key bindings; this list
+ * only documents them so the two never drift.
+ */
+const KEY_SHORTCUTS: { keys: string; label: string }[] = [
+  { keys: 'Space', label: 'Pause / resume' },
+  { keys: '[  ]', label: 'Slower / faster' },
+  { keys: 'H', label: 'Hide the HUD' },
+  { keys: 'F', label: 'Fullscreen' },
+  { keys: '?', label: 'This help' },
+  { keys: 'Esc', label: 'Close help / exit cinema' },
+];
+const POINTER_SHORTCUTS: { keys: string; label: string }[] = [
+  { keys: 'Drag', label: 'Orbit' },
+  { keys: 'Scroll', label: 'Zoom in / out' },
+  { keys: 'Click', label: 'Focus a body' },
+];
+
+/** localStorage flag: the first-visit hint shows once, then never again. */
+const HINT_KEY = 'saturn.hinted';
+
 export class Hud {
   private readonly dateEl: HTMLElement;
   private readonly fpsEl: HTMLElement;
@@ -77,6 +102,8 @@ export class Hud {
   private readonly bodyButtons = new Map<string, HTMLButtonElement>();
   private readonly speedButtons: HTMLButtonElement[] = [];
   private pauseBtn!: HTMLButtonElement;
+  private fovInput!: HTMLInputElement;
+  private readonly helpEl: HTMLElement;
   private paused = false;
   /** True while the date readout is swapped for its editor (don't clobber it). */
   private editing = false;
@@ -222,6 +249,10 @@ export class Hud {
         <span>EV</span>
         <input type="range" min="0.5" max="2.6" step="0.05" value="1.4" data-t="exposure">
       </div>
+      <div class="hud-exposure">
+        <span>FOV</span>
+        <input type="range" min="${FOV_MIN}" max="${FOV_MAX}" step="1" value="${FOV_DEFAULT}" data-t="fov">
+      </div>
       <div class="hud-quality">
         <span>Quality</span>
         <div class="hud-quality-btns"></div>
@@ -243,6 +274,8 @@ export class Hud {
       .addEventListener('change', (e) => cb.onToggleDrift((e.target as HTMLInputElement).checked));
     info.querySelector<HTMLInputElement>('input[data-t="exposure"]')!
       .addEventListener('input', (e) => cb.onExposure(Number((e.target as HTMLInputElement).value)));
+    this.fovInput = info.querySelector<HTMLInputElement>('input[data-t="fov"]')!;
+    this.fovInput.addEventListener('input', (e) => cb.onFov(Number((e.target as HTMLInputElement).value)));
 
     const qBtns = info.querySelector('.hud-quality-btns')!;
     for (const name of ['low', 'med', 'high', 'ultra'] as QualityName[]) {
@@ -292,6 +325,61 @@ export class Hud {
         /* user dismissed the share sheet, or clipboard was blocked */
       }
     });
+
+    // Help overlay ('?' toggles, Esc closes — bindings live in main.ts). Built
+    // from the shared shortcut lists so it can never disagree with the keys.
+    this.helpEl = document.createElement('div');
+    this.helpEl.className = 'panel hud-help';
+    const rows = (list: { keys: string; label: string }[]): string =>
+      list.map((s) => `<span class="k">${s.keys}</span><span>${s.label}</span>`).join('');
+    this.helpEl.innerHTML =
+      `<h2>Controls</h2>
+       <div class="hud-help-grid">${rows(POINTER_SHORTCUTS)}</div>
+       <h3>Keyboard</h3>
+       <div class="hud-help-grid">${rows(KEY_SHORTCUTS)}</div>`;
+    hud.appendChild(this.helpEl);
+
+    // First-visit hint: the camera model (no pan, H hides the HUD) isn't
+    // obvious. Show once, dismiss on the first interaction, remember forever.
+    let hinted = false;
+    try { hinted = localStorage.getItem(HINT_KEY) === '1'; } catch { /* private mode */ }
+    if (!hinted) {
+      const hint = document.createElement('div');
+      hint.className = 'hud-hint show';
+      hint.textContent = 'Drag to orbit · Scroll to zoom · Click a moon';
+      hud.appendChild(hint);
+      const dismiss = (): void => {
+        hint.classList.remove('show');
+        setTimeout(() => hint.remove(), 500);
+        try { localStorage.setItem(HINT_KEY, '1'); } catch { /* private mode */ }
+        window.removeEventListener('pointerdown', dismiss);
+        window.removeEventListener('wheel', dismiss);
+        window.removeEventListener('keydown', dismiss);
+      };
+      window.addEventListener('pointerdown', dismiss);
+      window.addEventListener('wheel', dismiss, { passive: true });
+      window.addEventListener('keydown', dismiss);
+    }
+  }
+
+  /** Whether the help overlay is currently shown. */
+  get helpOpen(): boolean {
+    return this.helpEl.classList.contains('show');
+  }
+
+  /** Toggle the help overlay (bound to '?' in main.ts). */
+  toggleHelp(): void {
+    this.helpEl.classList.toggle('show');
+  }
+
+  /** Hide the help overlay (bound to Esc in main.ts). */
+  closeHelp(): void {
+    this.helpEl.classList.remove('show');
+  }
+
+  /** Reflect the camera FOV in the slider (URL restore / programmatic sync). */
+  setFov(deg: number): void {
+    this.fovInput.value = String(Math.round(deg));
   }
 
   /** Briefly show a status toast (~1.5 s), reusing the single toast element. */

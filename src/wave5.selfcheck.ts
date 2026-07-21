@@ -57,7 +57,7 @@ const assert = {
 // --- cam validation --------------------------------------------------------
 {
   assert.ok(parseState('?cam=1,2').cam === undefined, 'cam needs 3 components');
-  assert.ok(parseState('?cam=1,2,3,4').cam === undefined, 'cam rejects 4 components');
+  assert.ok(parseState('?cam=1,2,3,4,5').cam === undefined, 'cam rejects 5 components');
   assert.ok(parseState('?cam=1,x,3').cam === undefined, 'cam rejects non-numeric');
   assert.ok(parseState('?cam=1,2,0').cam === undefined, 'cam rejects non-positive dist');
   assert.ok(parseState('?cam=1,2,-5').cam === undefined, 'cam rejects negative dist');
@@ -65,6 +65,14 @@ const assert = {
   assert.near(okCam.az, 0.5, 1e-9, 'cam az parsed');
   assert.near(okCam.el, -0.25, 1e-9, 'cam el parsed');
   assert.near(okCam.dist, 12.5, 1e-9, 'cam dist parsed');
+  assert.ok(okCam.fov === undefined, 'cam without 4th component has no fov');
+
+  // 4th component is the FOV lens (degrees), validated against the slider range.
+  const lensCam = parseState('?cam=0.5,-0.25,12.5,28').cam!;
+  assert.near(lensCam.fov!, 28, 1e-9, 'cam fov parsed');
+  const wideDropped = parseState('?cam=0.5,-0.25,12.5,120').cam!;
+  assert.ok(wideDropped.fov === undefined, 'out-of-range fov dropped, pose kept');
+  assert.near(wideDropped.dist, 12.5, 1e-9, 'pose survives an invalid fov');
 }
 
 // --- focus normalisation ---------------------------------------------------
@@ -80,7 +88,7 @@ const assert = {
     focus: 'enceladus',
     jd: 2460000.123456,
     speed: -3600,
-    cam: { az: 1.2345, el: -0.4211, dist: 42.75 },
+    cam: { az: 1.2345, el: -0.4211, dist: 42.75, fov: 32.5 },
   };
   const round = parseState(serializeState(state));
   assert.ok(round.focus === 'enceladus', 'round-trip focus');
@@ -89,6 +97,7 @@ const assert = {
   assert.near(round.cam!.az, state.cam!.az, 1e-5, 'round-trip cam az');
   assert.near(round.cam!.el, state.cam!.el, 1e-5, 'round-trip cam el');
   assert.near(round.cam!.dist, state.cam!.dist, 1e-3, 'round-trip cam dist');
+  assert.near(round.cam!.fov!, state.cam!.fov!, 1e-2, 'round-trip cam fov');
 
   // Invalid fields drop out of serialization entirely.
   const partial = serializeState({ jd: 9e9, focus: '<x>', speed: 100 });

@@ -7,14 +7,21 @@
  * every field of `x` that was valid. Parsing NEVER throws — invalid ids, junk
  * numbers and out-of-range dates are simply dropped.
  *
- *   ?focus=<id>&jd=<julian>&speed=<s>&cam=<az>,<el>,<dist>
+ *   ?focus=<id>&jd=<julian>&speed=<s>&cam=<az>,<el>,<dist>[,<fov>]
  *
  * `cam` is a spherical offset (azimuth/elevation in radians, distance in scene
  * units) *relative to the focused body*, so a shared link frames the same body
- * the same way wherever that body happens to be in its orbit.
+ * the same way wherever that body happens to be in its orbit. An optional 4th
+ * component carries the camera FOV (degrees) so shared links / photos preserve
+ * the lens (F8.7).
  */
 
 import { J2000 } from '../orbital/types.ts';
+
+/** Field-of-view slider bounds (degrees) — shared with the HUD and main loop. */
+export const FOV_MIN = 10;
+export const FOV_MAX = 60;
+export const FOV_DEFAULT = 45;
 
 export interface CameraPose {
   /** Azimuth around the vertical axis, radians. */
@@ -23,6 +30,8 @@ export interface CameraPose {
   el: number;
   /** Distance from the body, scene units. */
   dist: number;
+  /** Vertical field of view, degrees (optional; the lens the link was made at). */
+  fov?: number;
 }
 
 export interface UrlState {
@@ -94,12 +103,18 @@ export function parseState(search: string): UrlState {
   const cam = params.get('cam');
   if (cam !== null) {
     const parts = cam.split(',');
-    if (parts.length === 3) {
+    // 3 components (az,el,dist) or 4 (…,fov). Anything else is junk.
+    if (parts.length === 3 || parts.length === 4) {
       const az = finiteNum(parts[0]);
       const el = finiteNum(parts[1]);
       const dist = finiteNum(parts[2]);
       if (az !== undefined && el !== undefined && dist !== undefined && dist > 0) {
         out.cam = { az, el, dist };
+        if (parts.length === 4) {
+          const fov = finiteNum(parts[3]);
+          // Out-of-range fov is dropped; the pose still restores at default lens.
+          if (fov !== undefined && fov >= FOV_MIN && fov <= FOV_MAX) out.cam.fov = fov;
+        }
       }
     }
   }
@@ -132,8 +147,12 @@ export function serializeState(state: UrlState): string {
     Number.isFinite(state.cam.az) && Number.isFinite(state.cam.el) &&
     Number.isFinite(state.cam.dist) && state.cam.dist > 0
   ) {
-    const { az, el, dist } = state.cam;
-    params.set('cam', `${round(az, 5)},${round(el, 5)},${round(dist, 3)}`);
+    const { az, el, dist, fov } = state.cam;
+    let camStr = `${round(az, 5)},${round(el, 5)},${round(dist, 3)}`;
+    if (fov !== undefined && Number.isFinite(fov) && fov >= FOV_MIN && fov <= FOV_MAX) {
+      camStr += `,${round(fov, 2)}`;
+    }
+    params.set('cam', camStr);
   }
 
   return params.toString();
