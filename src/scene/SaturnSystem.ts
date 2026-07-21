@@ -27,8 +27,8 @@ import { createRaymarchedAtmosphere } from '../materials/raymarchAtmosphere.ts';
 import { createEnceladusPlumes, type PlumeSystem } from '../effects/plumes.ts';
 import { createERing } from '../effects/eRing.ts';
 import {
-  cloudPhaseUniform, edgeOnUniform, moonShadowUniforms, plumeActivityUniform,
-  seasonalTiltUniform, spokePhaseUniform,
+  cloudPhaseUniform, daphnisLonUniform, edgeOnUniform, moonShadowUniforms,
+  plumeActivityUniform, seasonalTiltUniform, spokePhaseUniform,
 } from '../materials/sharedUniforms.ts';
 import { seasonalTilt } from '../data/season.ts';
 import { createFRing } from '../materials/fRing.ts';
@@ -463,6 +463,15 @@ export class SaturnSystem {
     if (enceladus?.elements) {
       const meanAnomaly = meanAnomalyAt(enceladus.elements, jd);
       plumeActivityUniform.value = 0.625 - 0.375 * Math.cos(meanAnomaly);
+    }
+
+    // Daphnis' ring-frame azimuth drives the Keeler-gap edge waves (F11.2) so
+    // they travel locked to the moon. The scene ring azimuth atan(P.z, P.x) is
+    // the NEGATIVE of the orbital angle (prograde ⇒ decreasing atan(z,x) for the
+    // Y-up scene convention); Daphnis has e=0/i=0 so this is exact.
+    const daphnis = MINOR_MOONS.find((m) => m.id === 'daphnis');
+    if (daphnis?.elements) {
+      daphnisLonUniform.value = -orbitalAngleAt(daphnis.elements, jd);
     }
 
     if (sunDir) this.ringshine.update(sunDir);

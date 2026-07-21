@@ -20,6 +20,15 @@ export const moonShadowUniforms = Array.from(
 /** Rotation phase of the B-ring spoke pattern (corotates with the magnetosphere). */
 export const spokePhaseUniform = uniform(0);
 
+/**
+ * Daphnis' ring-frame azimuth (radians) — the angle atan(P.z, P.x) of the moon's
+ * scene position, so the Keeler-gap edge waves (F11.2) stay locked to the moon
+ * and travel with it. Updated once per frame in SaturnSystem.update from
+ * orbitalAngleAt(Daphnis). Note the scene convention makes the ring azimuth the
+ * NEGATIVE of the orbital angle (prograde = decreasing atan(z,x)).
+ */
+export const daphnisLonUniform = uniform(0);
+
 /** Cloud-advection phase for Saturn's zonal jets (sim-time driven, wraps). */
 export const cloudPhaseUniform = uniform(0);
 

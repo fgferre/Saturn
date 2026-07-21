@@ -18,7 +18,8 @@ import {
   max, mix, mul, mx_fractal_noise_float, normalize, oneMinus, positionWorld,
   pow, sin, smoothstep, texture, uv, vec2, vec3,
 } from 'three/tsl';
-import { spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
+import { daphnisLonUniform, spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
+import { RINGS } from '../data/saturn.ts';
 import { moonTransitLight } from './moonTransits.ts';
 import { planetShadow } from './planetShadow.ts';
 import type { RingProfile } from './ringProfile.ts';
@@ -49,15 +50,64 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
     depthWrite: false,
   });
 
-  const sample = texture(profile.texture, vec2(uv().x, 0.5));
+  const P = positionWorld;
+  const V = normalize(cameraPosition.sub(P));
+  const S = sunDirUniform;
+  const rawAng = atan(P.z, P.x); // ring-frame azimuth, radians
+
+  // --- Daphnis' Keeler-gap edge waves (F11.2) ---
+  // The moon's gravity raises a wavy scallop on the Keeler-gap edges that only
+  // exists in its wake, damping over tens of degrees (PIA11656). We perturb the
+  // radial SAMPLE coordinate `ru` (never the geometry) in a narrow band around
+  // the gap so the sharp bright-A-ring/gap edge ripples azimuthally.
+  //
+  // Kepler-shear zigzag (Weiss/Porco/Tiscareno 2009): the inner gap edge orbits
+  // faster than Daphnis → after conjunction it runs AHEAD → waves LEADING the
+  // moon; the outer edge is slower → waves TRAILING. `phi` is the wrapped
+  // azimuth relative to the moon (leading = phi<0, trailing = phi>0). The gap
+  // is only ~42 km wide (sub-texel), so the inner/outer split is a deliberately
+  // widened band and the wavelength is exaggerated (real ~100-200 km is subpixel
+  // on the system scale; N≈30-40 lobes here is artistic license for legibility).
+  const KEELER = RINGS.regions.keelerGap; // [136485, 136522] km
+  const span = profile.outerKm - profile.innerKm;
+  const ruCenter = ((KEELER[0] + KEELER[1]) / 2 - profile.innerKm) / span;
+  const BAND = 0.006; // ru half-width of the perturbed band (~440 km — widened)
+  const SPLIT = 0.0012; // ru half-width of the inner/outer transition
+  const K = 300; // azimuthal wavenumber (integer ⇒ seamless across 2π)
+  const SIGMA = 0.22; // wake decay in azimuth (rad); visible to ~30°
+  const AMP = 0.0013; // ru sample displacement (exaggerated so it isn't subpixel)
+
+  const ruBase = uv().x;
+  // Wrapped azimuth to the moon: seamless in θ (no seam at 2π), and the wake
+  // envelope stays correctly localized even when the moon sits near ±π.
+  const dTheta = rawAng.sub(daphnisLonUniform);
+  const phi = atan(sin(dTheta), cos(dTheta));
+  const q = phi.div(SIGMA);
+  const decayEnv = q.mul(q).negate().exp(); // exp(-(phi/σ)²) — one wake per edge
+  const trailingGate = smoothstep(float(-0.02), float(0.02), phi); // phi>0
+  const leadingGate = oneMinus(trailingGate); // phi<0
+  // Radial band around the gap, split into an inner (leading) and outer
+  // (trailing) half — the Kepler-shear zigzag.
+  const edgeMask = smoothstep(float(ruCenter - BAND), float(ruCenter), ruBase)
+    .mul(oneMinus(smoothstep(float(ruCenter), float(ruCenter + BAND), ruBase)));
+  const radialInner = oneMinus(
+    smoothstep(float(ruCenter - SPLIT), float(ruCenter + SPLIT), ruBase),
+  );
+  const radialOuter = oneMinus(radialInner);
+  // Fade the high-frequency ripple before it aliases at distance (fwidth of the
+  // azimuth — same idea as the grain fade below).
+  const rippleFade = clamp(oneMinus(fwidth(rawAng).mul(150)), 0.0, 1.0);
+  const spatial = edgeMask.mul(
+    radialInner.mul(leadingGate).add(radialOuter.mul(trailingGate)),
+  );
+  const deltaRu = sin(phi.mul(K)).mul(AMP).mul(decayEnv).mul(spatial).mul(rippleFade);
+  const ru = clamp(ruBase.add(deltaRu), 0.0, 1.0);
+
+  const sample = texture(profile.texture, vec2(ru, 0.5));
   // Calibrated against PIA21345 (Cassini natural color): the rings are a
   // muted warm khaki, distinctly darker than Saturn's creamy disk.
   const albedo = sample.rgb.mul(vec3(0.80, 0.75, 0.62));
   const alpha = sample.a;
-
-  const P = positionWorld;
-  const V = normalize(cameraPosition.sub(P));
-  const S = sunDirUniform;
 
   // --- Planet shadow (Saturn's oblate umbra + penumbra, shared with the F/E
   // rings) combined with in-shader moon transits. ---
@@ -74,7 +124,7 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   let face, fwd;
   if (scatter) {
     // Real measured radial brightness profiles.
-    const s = texture(scatterTexture(scatter), vec2(uv().x, 0.5));
+    const s = texture(scatterTexture(scatter), vec2(ru, 0.5));
     const lit = albedo.mul(s.r).mul(ill).mul(1.05);
     const unlitSide = albedo.mul(s.b).mul(ill).mul(0.8);
     face = mix(unlitSide, lit, sameSide);
@@ -89,7 +139,6 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   // --- B-ring spokes: ghostly radial streaks of levitated dust that corotate
   // with the magnetosphere. Dark in backscattered light, bright when backlit.
   // Seasonal in reality (near-equinox phenomenon — which the mid-2020s are).
-  const rawAng = atan(P.z, P.x);
   const ang = rawAng.add(spokePhaseUniform);
   const rr = uv().x;
   const bMask = smoothstep(0.34, 0.42, rr).mul(smoothstep(0.70, 0.60, rr));
