@@ -12,16 +12,20 @@ import {
   Mesh, PlaneGeometry, SphereGeometry, Texture, Vector3,
 } from 'three';
 import { MeshBasicNodeMaterial, SpriteNodeMaterial } from 'three/webgpu';
-import { instancedBufferAttribute, smoothstep, texture, uv } from 'three/tsl';
+import { instancedBufferAttribute, oneMinus, smoothstep, texture, uv } from 'three/tsl';
 import { makeRng } from '../utils/noise.ts';
 import { icrfToSceneMatrix } from '../data/sunDirection.ts';
 
-const RADIUS = 30000;
+/** Local radius of the procedural star shell (camera-centered each frame). */
+export const SKY_RADIUS = 50000;
 const COUNT = 8400;
 
 /**
  * Real celestial sphere: NASA SVS Deep Star Map on a giant back-side sphere,
  * rotated so the Milky Way sits where it truly is in Saturn's sky.
+ *
+ * Onda 3: mesh is camera-centered every frame (see main) so the sky has no
+ * parallax and the camera can never "reach" the shell.
  */
 export function createSky(map: Texture): Mesh {
   const material = new MeshBasicNodeMaterial();
@@ -30,9 +34,11 @@ export function createSky(map: Texture): Mesh {
   // Slight lift so the Milky Way survives ACES tone mapping.
   material.colorNode = texture(map, uv()).rgb.mul(1.35);
 
-  const mesh = new Mesh(new SphereGeometry(55000, 64, 32), material);
+  // Radius well beyond SUN_FOLLOW_DISTANCE and the system; centered on camera.
+  const mesh = new Mesh(new SphereGeometry(SKY_RADIUS, 64, 32), material);
   mesh.setRotationFromMatrix(icrfToSceneMatrix());
   mesh.renderOrder = -2; // behind everything, before orbit lines
+  mesh.frustumCulled = false;
   return mesh;
 }
 
@@ -66,10 +72,11 @@ export function createStarfield(): Mesh {
   const addStar = (dir: Vector3, brightness: number) => {
     const [r, g, b] = starColor(rng());
     const v = 0.3 + brightness * 0.7;
-    positions.set([dir.x * RADIUS, dir.y * RADIUS, dir.z * RADIUS], i * 3);
+    // Local positions: parent mesh is translated to the camera each frame.
+    positions.set([dir.x * SKY_RADIUS, dir.y * SKY_RADIUS, dir.z * SKY_RADIUS], i * 3);
     colors.set([r * v, g * v, b * v], i * 3);
-    // World-unit sprite size at 30k distance: ~1–3 px on a 1080p screen.
-    scales[i] = 26 + Math.pow(brightness, 3) * 60;
+    // World-unit sprite size at SKY_RADIUS: ~1–3 px on a 1080p screen.
+    scales[i] = 40 + Math.pow(brightness, 3) * 90;
     i++;
   };
 
@@ -101,11 +108,18 @@ export function createStarfield(): Mesh {
 
   material.positionNode = instancedBufferAttribute(geometry.attributes.starPos as InstancedBufferAttribute);
   material.scaleNode = instancedBufferAttribute(geometry.attributes.starScale as InstancedBufferAttribute);
-  const disc = smoothstep(0.5, 0.1, uv().sub(0.5).length());
+  // Defined form: edge0 < edge1 (same portability rule as Sun.ts).
+  const disc = oneMinus(smoothstep(0.1, 0.5, uv().sub(0.5).length()));
   material.colorNode = instancedBufferAttribute(geometry.attributes.starColor as InstancedBufferAttribute);
   material.opacityNode = disc;
 
   const mesh = new Mesh(geometry, material);
   mesh.frustumCulled = false;
+  mesh.renderOrder = -2;
   return mesh;
+}
+
+/** Keep a camera-centered sky/starfield co-located with the viewer. */
+export function followCamera(background: Mesh, cameraPos: Vector3): void {
+  background.position.copy(cameraPos);
 }

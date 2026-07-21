@@ -9,7 +9,7 @@
  */
 
 import { Texture, Vector2, Vector3 } from 'three';
-import { MeshStandardNodeMaterial } from 'three/webgpu';
+import type { MeshStandardNodeMaterial } from 'three/webgpu';
 import {
   abs, cameraPosition, clamp, dot, float, mix, mul, mx_fractal_noise_float,
   mx_noise_float, mx_worley_noise_float, normalize, normalWorld, oneMinus,
@@ -18,6 +18,7 @@ import {
 import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
 import { MoonNodeMaterial, type HapkeParams } from './hapke.ts';
+import { DirectMaskedStandardMaterial } from './directMaskedLighting.ts';
 import type { MoonRelief } from './textures.ts';
 
 type NodeObj = ShaderNodeObject<Node>;
@@ -34,7 +35,7 @@ function icyBase(
 }
 
 function makeMoonMaterial(colorNode: NodeObj): MeshStandardNodeMaterial {
-  const m = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
+  const m = new DirectMaskedStandardMaterial({ roughness: 0.95, metalness: 0 });
   m.colorNode = colorNode;
   return m;
 }
@@ -138,9 +139,10 @@ function titanSurface(): MeshStandardNodeMaterial {
   // Extremely soft banding.
   const band = mx_noise_float(vec3(mul(lat, 6.0), 3.3, 7.7), 1.0).mul(0.05);
   color = color.add(band);
-  const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0 });
+  const m = new DirectMaskedStandardMaterial({ roughness: 1, metalness: 0 });
   m.colorNode = color;
   // Haze scatters strongly toward the limb — bake a fresnel brightening in.
+  // (Volumetric Titan haze shell is separate and not eclipsed in this wave.)
   const n = normalize(normalWorld);
   const V = normalize(cameraPosition.sub(positionWorld));
   const rim = pow(oneMinus(abs(dot(n, V))), 3.0);
@@ -175,7 +177,8 @@ function saturnshine(): NodeObj {
   const toSaturn = normalize(positionWorld.negate()); // Saturn sits at the origin
   const facing = clamp(dot(normalize(normalWorld), toSaturn), 0, 1);
   const dist = positionWorld.length();
-  const apparent = clamp(pow(mul(60.268, 1).div(dist), 2).mul(0.5), 0, 0.08);
+  // Gain lifted slightly after removing AmbientLight (F7.3).
+  const apparent = clamp(pow(mul(60.268, 1).div(dist), 2).mul(0.62), 0, 0.10);
   return vec3(1.0, 0.93, 0.75).mul(facing.mul(apparent)) as unknown as NodeObj;
 }
 
@@ -231,11 +234,17 @@ export function createMoonMaterial(
     m = builder ? builder() : makeMoonMaterial(icyBase([0.7, 0.7, 0.68], 5, 0.25));
   }
 
-  // Eclipse darkening (Saturn's umbra + ring shadows), computed on the CPU.
-  if (eclipseLight && m.colorNode) {
-    m.colorNode = (m.colorNode as NodeObj).mul(eclipseLight);
+  // Eclipse / ring shadow: attenuate *direct* sunlight only (Onda 2).
+  // Albedo and saturnshine emissive stay full so night-side planet-glow
+  // remains visible inside Saturn's umbra.
+  if (eclipseLight) {
+    if (m instanceof MoonNodeMaterial) {
+      m.directLightMask = eclipseLight;
+    } else if (m instanceof DirectMaskedStandardMaterial) {
+      m.directLightMask = eclipseLight;
+    }
   }
-  // Saturnshine on the planet-facing hemisphere.
+  // Saturnshine on the planet-facing hemisphere (emissive — not eclipsed).
   const shine = saturnshine();
   m.emissiveNode = m.emissiveNode ? (m.emissiveNode as NodeObj).add(shine) : shine;
   return m;

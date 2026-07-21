@@ -7,13 +7,14 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "node --experimental-strip-types src/orbital/kepler.selfcheck.ts",
+    "check": "tsc --noEmit -p tsconfig.selfcheck.json && node --experimental-strip-types src/orbital/kepler.selfcheck.ts && node --experimental-strip-types src/wave1.selfcheck.ts && node --experimental-strip-types src/wave2.selfcheck.ts && node --experimental-strip-types src/wave3.selfcheck.ts && node --experimental-strip-types src/wave4.selfcheck.ts",
     "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "three": "^0.178.0"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "@types/three": "^0.178.0",
     "typescript": "^5.5.0",
     "vite": "^6.0.0"

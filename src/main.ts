@@ -4,7 +4,7 @@ import { Vector3 } from 'three';
 import { Engine } from './core/Engine.ts';
 import { SimClock } from './core/SimClock.ts';
 import { SaturnSystem } from './scene/SaturnSystem.ts';
-import { createSky, createStarfield } from './scene/Starfield.ts';
+import { createSky, createStarfield, followCamera } from './scene/Starfield.ts';
 import { Sun } from './scene/Sun.ts';
 import { loadAllMaps } from './materials/textures.ts';
 import { FocusControls } from './camera/FocusControls.ts';
@@ -13,7 +13,10 @@ import {
   eRingVisUniform, edgeOnUniform, slabVisUniform, sunDirUniform,
   sunVisibilityUniform,
 } from './materials/sharedUniforms.ts';
-import { saturnShadowOnMoon } from './physics/eclipse.ts';
+import {
+  solarAtmosphereTint, sunVisibilityFromCamera,
+} from './physics/eclipse.ts';
+import { solarTintUniform } from './scene/Sun.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
 import { Hud } from './ui/hud.ts';
 import { BodyLabels } from './ui/labels.ts';
@@ -34,7 +37,9 @@ async function boot(): Promise<void> {
   }
   const sun = new Sun();
   // Real NASA starmap sky when available, procedural starfield otherwise.
-  scene.add(system.group, sun.group, maps.starmap ? createSky(maps.starmap) : createStarfield());
+  // Onda 3: background is camera-centered every frame (no parallax / reach).
+  const sky = maps.starmap ? createSky(maps.starmap) : createStarfield();
+  scene.add(system.group, sun.group, sky);
 
   system.update(clock.jd);
 
@@ -127,6 +132,14 @@ async function boot(): Promise<void> {
 
   const sunDir = new Vector3();
   const camDist = new Vector3();
+  const solarTintScratch = new Vector3(1, 1, 1);
+  /** Moon disks for solar-eclipse glare gating (rebuilt each frame). */
+  const moonDisks: { pos: Vector3; radius: number }[] = MOONS.map(() => ({
+    pos: new Vector3(), radius: 0,
+  }));
+  // F7.2 temporal smooth of glare visibility (~10 Hz half-life → no ring-edge pop).
+  let sunVisSmoothed = 1;
+  const SUN_VIS_HALF_LIFE = 0.1;
   let fpsAccum = 0;
   let fpsFrames = 0;
   // One-shot auto-tuner: measure the first seconds, step down if struggling.
@@ -140,11 +153,17 @@ async function boot(): Promise<void> {
 
     sunDirectionAt(clock.jd, sunDir);
     sunDirUniform.value.copy(sunDir);
-    sun.update(sunDir);
 
+    // 1) Bodies first, 2) final camera pose, 3) sun/sky on that pose, 4) render.
+    // (Onda 3 B2: never place the disk/sky before controls.update.)
     system.update(clock.jd, sunDir);
     controls.update(dt);
     cinema.update(dt);
+
+    // Shared infinite direction: disk, seed, DirectionalLight, occlusion gate.
+    sun.update(sunDir, camera.position);
+    followCamera(sky, camera.position);
+
     labels.update(camera, getPos, controls.focusId);
 
     // DOF tracks the focused body; aperture scaled so distant framings stay
@@ -170,11 +189,24 @@ async function boot(): Promise<void> {
       }
     }
 
-    // Lens flare gating: how much of the sun does the camera actually see?
-    // (Same occlusion math as moon eclipses: Saturn's ellipsoid + ring alpha.)
-    sunVisibilityUniform.value = saturnShadowOnMoon(
-      camera.position, sunDir, system.ringProfile.opacityAt,
+    // Glare gate: Saturn + rings + moons (solar eclipses), temporally smoothed.
+    for (let i = 0; i < MOONS.length; i++) {
+      const def = MOONS[i];
+      system.getBodyPosition(def.id, moonDisks[i].pos);
+      moonDisks[i].radius = def.physical.radiusKm / KM_PER_UNIT;
+    }
+    const visTarget = sunVisibilityFromCamera(
+      camera.position, sunDir, system.ringProfile.opacityAt, moonDisks,
     );
+    const k = 1 - Math.exp((-dt * Math.LN2) / SUN_VIS_HALF_LIFE);
+    sunVisSmoothed += (visTarget - sunVisSmoothed) * k;
+    sunVisibilityUniform.value = sunVisSmoothed;
+
+    // F7.5 — atmosphere transmittance only (no × vis). Disk and the whole
+    // solar glare chain multiply tint × sunVisibility separately so colour
+    // and extinction stay in lockstep without accidental vis².
+    solarAtmosphereTint(camera.position, sunDir, solarTintScratch);
+    solarTintUniform.value.copy(solarTintScratch);
 
     // Ring-plane proximity factors: edge-on rim ribbon + fly-through slab.
     const camLen = Math.max(camera.position.length(), 1e-3);

@@ -2,27 +2,74 @@
  * Rendering engine: WebGPU with automatic WebGL2 fallback (three's
  * WebGPURenderer handles the downgrade internally), ACES tone mapping and a
  * TSL bloom post-processing chain.
+ *
+ * Onda 3 final composition (review architecture):
+ *
+ *   base camera   : layers 0 + DISPLAY_SUN_LAYER
+ *                   → system + display sun share one depth buffer (occlusion)
+ *   bloom camera  : layer 0 only
+ *                   → beautyBloom never samples the display sun (no square halo)
+ *   solar camera  : SOLAR_LAYER only
+ *                   → seed glare (round profile) + optional lensflare
+ *                     × solarTint × sunVisibility
+ *
+ *   comp = basePass + beautyBloom + solar glare chain
+ *
+ * `?post=raw|bloom|anamorphic|flare|full` for controlled A/B (default full).
+ * Solar anamorphic streak removed (F7 delta final) — beads/blue bar vs warm sun.
  */
 
-import { AgXToneMapping, PerspectiveCamera, RenderTarget, Scene } from 'three';
+import { AgXToneMapping, PerspectiveCamera, RenderTarget, Scene, Vector2 } from 'three';
 import { PostProcessing, WebGPURenderer } from 'three/webgpu';
-import { float, oneMinus, pass, screenUV, uniform, vec2 } from 'three/tsl';
+import { float, oneMinus, pass, screenUV, uniform, vec2, vec3 } from 'three/tsl';
 import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
-import { anamorphic } from 'three/addons/tsl/display/AnamorphicNode.js';
 import { lensflare } from 'three/addons/tsl/display/LensflareNode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { chromaticAberration } from 'three/addons/tsl/display/ChromaticAberrationNode.js';
 import { sunVisibilityUniform } from '../materials/sharedUniforms.ts';
+import { DISPLAY_SUN_LAYER, SOLAR_LAYER, solarTintUniform } from '../scene/Sun.ts';
 import { quality } from './quality.ts';
+
+/** Post A/B modes for QA (`?post=`). `anamorphic` kept as alias of full solar glow. */
+export type PostMode = 'raw' | 'bloom' | 'anamorphic' | 'flare' | 'full';
+
+function postModeFromUrl(): PostMode {
+  const v = new URLSearchParams(location.search).get('post');
+  if (v === 'raw' || v === 'bloom' || v === 'anamorphic' || v === 'flare' || v === 'full') {
+    return v;
+  }
+  return 'full';
+}
+
+function copyCameraPose(src: PerspectiveCamera, dst: PerspectiveCamera): void {
+  dst.position.copy(src.position);
+  dst.quaternion.copy(src.quaternion);
+  dst.fov = src.fov;
+  dst.aspect = src.aspect;
+  dst.near = src.near;
+  dst.far = src.far;
+  dst.zoom = src.zoom;
+  dst.updateProjectionMatrix();
+  dst.updateMatrixWorld();
+}
 
 export class Engine {
   readonly renderer: WebGPURenderer;
   readonly scene = new Scene();
+  /**
+   * Base / navigation camera: layers 0 + DISPLAY_SUN_LAYER so the disk is
+   * depth-tested against Saturn, rings and moons.
+   */
   readonly camera: PerspectiveCamera;
+  /** Bloom source: layer 0 only (no display sun). */
+  readonly bloomCamera: PerspectiveCamera;
+  /** Solar-seed camera: SOLAR_LAYER only — feeds the lens chain. */
+  readonly solarCamera: PerspectiveCamera;
   readonly backendName: 'WebGPU' | 'WebGL2';
+  readonly postMode: PostMode;
   /** DOF focus distance (view-space) and aperture, fed per frame from main. */
   readonly dofFocus = uniform(300);
   readonly dofAperture = uniform(0.0);
@@ -31,11 +78,22 @@ export class Engine {
   private constructor(renderer: WebGPURenderer, container: HTMLElement) {
     this.renderer = renderer;
     container.appendChild(renderer.domElement);
+    this.postMode = postModeFromUrl();
 
     // Zero-size containers happen in hidden/background tabs before layout.
     const width = container.clientWidth || 1280;
     const height = container.clientHeight || 720;
+
     this.camera = new PerspectiveCamera(45, width / height, 0.05, 120000);
+    this.camera.layers.disableAll();
+    this.camera.layers.enable(0);
+    this.camera.layers.enable(DISPLAY_SUN_LAYER);
+
+    this.bloomCamera = new PerspectiveCamera(45, width / height, 0.05, 120000);
+    this.bloomCamera.layers.set(0);
+
+    this.solarCamera = new PerspectiveCamera(45, width / height, 0.05, 120000);
+    this.solarCamera.layers.set(SOLAR_LAYER);
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.dprCap));
     renderer.setSize(width, height);
@@ -44,39 +102,67 @@ export class Engine {
     renderer.toneMapping = AgXToneMapping;
     renderer.toneMappingExposure = 1.4;
 
-    // MSAA on the scene pass only — the final fullscreen quad doesn't need it.
-    const scenePass = pass(this.scene, this.camera, { samples: quality.msaaSamples });
-    const bloomPass = bloom(scenePass, 0.45, 0.35, 0.82);
-    let comp: ShaderNodeObject<Node> = scenePass.add(bloomPass);
+    // Base: system + display sun, shared depth (occlusion).
+    const basePass = pass(this.scene, this.camera, { samples: quality.msaaSamples });
 
-    // Depth of field on scene+bloom only — lens-internal artifacts (streaks,
-    // ghosts) form after defocus and must not be depth-blurred.
-    if (quality.dof) {
-      comp = dof(comp, scenePass.getViewZNode(), this.dofFocus, this.dofAperture, float(0.008));
-    }
+    // Beauty bloom source: layer 0 only — never the display sun.
+    const bloomSrc = pass(this.scene, this.bloomCamera, { samples: 0 });
+    const beautyBloom = bloom(bloomSrc, 0.35, 0.4, 0.9);
 
-    // Physical lens system driven by the HDR sun disk, gated by how visible
-    // the sun actually is (CPU occlusion test -> sunVisibilityUniform).
-    if (quality.anamorphic) {
-      comp = comp.add(
-        anamorphic(scenePass, float(3.0), float(4), 24).mul(sunVisibilityUniform).mul(0.12),
+    // F7.2 — solar glare: round profile is *painted on the seed sprite*
+    // (core + r⁻² skirt). Composite solarPass directly — no wide BloomNode
+    // (mips → square lavender stacks on a point source). Optional tiny softener
+    // only if needed; default path is seed-only.
+    const solarPass = pass(this.scene, this.solarCamera, { samples: 0 });
+    // Optional 1-px-ish soften (radius tiny); keeps ghosts round if used.
+    const solarSoft = bloom(solarPass, 0.35, 0.12, 0.25);
+    const solarSource = solarPass.add(solarSoft.mul(0.35));
+
+    // Selective beauty bloom: base (depth-tested sun) + sun-free scene bloom.
+    let comp: ShaderNodeObject<Node> = this.postMode === 'raw'
+      ? basePass
+      : basePass.add(beautyBloom);
+
+    // DOF on the composite using base depth (sun already depth-tested).
+    if (this.postMode === 'full' && quality.dof) {
+      comp = dof(
+        comp, basePass.getViewZNode(), this.dofFocus, this.dofAperture, float(0.008),
       );
     }
-    if (quality.lensflare) {
+
+    // Solar glare: seed glow always (except raw); optional lensflare ghosts.
+    // Anamorphic streak removed (F7 final): discrete beads + internal blue
+    // fought the warm round glare (YAGNI — seed + flare carry the look).
+    const wantSolarGlow = this.postMode !== 'raw';
+    const wantFlare =
+      quality.lensflare && (this.postMode === 'flare' || this.postMode === 'full');
+    // One fade, one colour: solarGate = atmosphereTint × sunVisibility
+    const solarGate = solarTintUniform.mul(sunVisibilityUniform);
+    if (wantSolarGlow) {
+      // Round warm glare from the seed profile (no wide BloomNode mips).
+      comp = comp.add(solarSource.mul(solarGate).mul(0.95));
+    }
+    if (wantFlare) {
       comp = comp.add(
-        lensflare(bloomPass, { threshold: float(2.6), ghostSamples: float(3) })
-          .mul(sunVisibilityUniform).mul(0.35),
+        lensflare(solarSource, { threshold: float(0.9), ghostSamples: float(3) })
+          .mul(solarGate)
+          .mul(vec3(1.0, 0.94, 0.82))
+          .mul(0.18),
       );
     }
 
-    // Cinematic finish: subtle chromatic fringing at the frame edges,
-    // gentle vignette, fine animated film grain. (Center must be explicit —
-    // the r178 addon passes its null default straight into the node graph.)
-    comp = chromaticAberration(comp, float(0.35), vec2(0.5, 0.5), float(1.008));
-    const vignette = oneMinus(screenUV.sub(0.5).length().pow(2.2).mul(0.5));
-    comp = comp.mul(vignette);
+    // Cinematic finish (skip on pure raw A/B for cleaner metrics).
+    if (this.postMode !== 'raw') {
+      comp = chromaticAberration(comp, float(0.35), vec2(0.5, 0.5), float(1.008));
+      const vignette = oneMinus(screenUV.sub(0.5).length().pow(2.2).mul(0.5));
+      comp = comp.mul(vignette);
+    }
+
     this.post = new PostProcessing(renderer);
-    this.post.outputNode = quality.filmGrain > 0 ? film(comp, float(quality.filmGrain)) : comp;
+    this.post.outputNode =
+      quality.filmGrain > 0 && this.postMode === 'full'
+        ? film(comp, float(quality.filmGrain))
+        : comp;
 
     this.backendName = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
       ? 'WebGPU'
@@ -87,6 +173,10 @@ export class Engine {
       const h = container.clientHeight || 720;
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
+      this.bloomCamera.aspect = w / h;
+      this.bloomCamera.updateProjectionMatrix();
+      this.solarCamera.aspect = w / h;
+      this.solarCamera.updateProjectionMatrix();
       renderer.setSize(w, h);
     });
   }
@@ -103,6 +193,20 @@ export class Engine {
 
   private capturing = false;
   private readonly computes: object[] = [];
+
+  /**
+   * Keep bloom/solar cameras pose-identical to the base camera.
+   * Call after the frame's final camera pose is known.
+   */
+  syncAuxCameras(): void {
+    copyCameraPose(this.camera, this.bloomCamera);
+    copyCameraPose(this.camera, this.solarCamera);
+  }
+
+  /** @deprecated use syncAuxCameras */
+  syncSolarCamera(): void {
+    this.syncAuxCameras();
+  }
 
   /** Register a compute pass to run every frame (GPU particles etc.). */
   addCompute(node: object): void {
@@ -123,6 +227,7 @@ export class Engine {
       const dt = Math.min((now - last) / 1000, 0.1);
       last = now;
       cb(dt);
+      this.syncAuxCameras();
       for (const n of this.computes) this.renderer.compute(n as never);
       this.post.render();
     });
@@ -130,64 +235,93 @@ export class Engine {
 
   /** Render a single frame outside the rAF loop (headless testing). */
   async renderOnce(): Promise<void> {
+    this.syncAuxCameras();
     for (const n of this.computes) await this.renderer.computeAsync(n as never);
     await this.post.renderAsync();
   }
 
   /**
-   * Off-screen capture that works even when the tab is hidden (no canvas
-   * presentation involved): renders to a RenderTarget and reads pixels back.
-   * QA/testing only. `withPost` runs the full bloom/tone-mapping chain.
+   * QA capture of the current scene state (PNG).
+   *
+   * Always renders at the **current** drawing-buffer size (keeps PassNode
+   * internal RTs valid — resizing mid-capture produced black frames on WebGPU),
+   * then optionally downsamples to `width` via a 2D canvas.
+   *
+   * Output goes to an explicit RenderTarget + `readRenderTargetPixelsAsync`
+   * (WebGL2-safe; no default-FB / preserveDrawingBuffer dependency).
+   *
+   * Does **not** advance compute passes. State restored in `finally`.
    */
   async capture(width = 1280, withPost = true): Promise<string> {
     this.capturing = true;
+    const prevRT = this.renderer.getRenderTarget();
+    let rt: RenderTarget | null = null;
     try {
-      const aspect = Number.isFinite(this.camera.aspect) && this.camera.aspect > 0
-        ? this.camera.aspect
-        : 16 / 9;
-      const height = Math.round(width / aspect);
-      const rt = new RenderTarget(width, height);
-      const prev = this.renderer.getRenderTarget();
+      const cssSize = this.renderer.getSize(new Vector2());
+      const dpr = this.renderer.getPixelRatio();
+      // Drawing-buffer pixels (what PassNode / the GPU actually render into).
+      const fullW = Math.max(1, Math.round(cssSize.x * dpr));
+      const fullH = Math.max(1, Math.round(cssSize.y * dpr));
+
+      this.syncAuxCameras();
+      rt = new RenderTarget(fullW, fullH);
       this.renderer.setRenderTarget(rt);
+
       if (withPost) {
         await this.post.renderAsync();
       } else {
         await this.renderer.renderAsync(this.scene, this.camera);
       }
-      const buf = (await this.renderer.readRenderTargetPixelsAsync(
-        rt, 0, 0, width, height,
-      )) as Uint8Array;
-      this.renderer.setRenderTarget(prev);
-      rt.dispose();
 
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d')!;
-      const img = ctx.createImageData(width, height);
-      // The post chain already outputs display-ready sRGB; the raw path is linear.
+      const buf = (await this.renderer.readRenderTargetPixelsAsync(
+        rt, 0, 0, fullW, fullH,
+      )) as Uint8Array;
+
+      // Pack full-res pixels into an ImageData canvas (handle WebGL Y-flip).
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = fullW;
+      fullCanvas.height = fullH;
+      const fullCtx = fullCanvas.getContext('2d')!;
+      const img = fullCtx.createImageData(fullW, fullH);
       const encode = withPost
         ? (v: number) => v
         : (v: number) => {
             const c = v / 255;
-            return Math.round((c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
+            return Math.round(
+              (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255,
+            );
           };
-      // WebGL readbacks are bottom-up; WebGPU's are top-down.
       const flip = this.backendName === 'WebGL2';
-      for (let y = 0; y < height; y++) {
-        const srcY = flip ? height - 1 - y : y;
-        for (let x = 0; x < width; x++) {
-          const s = (srcY * width + x) * 4;
-          const d = (y * width + x) * 4;
+      for (let y = 0; y < fullH; y++) {
+        const srcY = flip ? fullH - 1 - y : y;
+        for (let x = 0; x < fullW; x++) {
+          const s = (srcY * fullW + x) * 4;
+          const d = (y * fullW + x) * 4;
           img.data[d] = encode(buf[s]);
           img.data[d + 1] = encode(buf[s + 1]);
           img.data[d + 2] = encode(buf[s + 2]);
           img.data[d + 3] = 255;
         }
       }
-      ctx.putImageData(img, 0, 0);
-      return canvas.toDataURL('image/jpeg', 0.92);
+      fullCtx.putImageData(img, 0, 0);
+
+      // Optional downsample to the requested width (no renderer.setSize).
+      const aspect = fullW / fullH;
+      const outW = width;
+      const outH = Math.max(1, Math.round(width / aspect));
+      if (outW === fullW && outH === fullH) {
+        return fullCanvas.toDataURL('image/png');
+      }
+      const outCanvas = document.createElement('canvas');
+      outCanvas.width = outW;
+      outCanvas.height = outH;
+      const outCtx = outCanvas.getContext('2d')!;
+      outCtx.imageSmoothingEnabled = true;
+      outCtx.drawImage(fullCanvas, 0, 0, outW, outH);
+      return outCanvas.toDataURL('image/png');
     } finally {
+      this.renderer.setRenderTarget(prevRT);
+      rt?.dispose();
       this.capturing = false;
     }
   }

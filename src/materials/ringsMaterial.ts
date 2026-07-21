@@ -133,8 +133,10 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   const grainFade = clamp(oneMinus(fwidth(rawAng).mul(30)), 0.0, 1.0);
   face = face.mul(grain.sub(0.5).mul(0.09).mul(grainFade).add(1.0));
 
+  // Saturnshine (planet-reflected fill on shadowed ring faces) — not ambient.
+  // Slightly raised after F7.3 removed the global AmbientLight.
   const color = face.mul(add(1.0, surge)).add(scatterColor.mul(fwd)).mul(shadow)
-    .add(albedo.mul(0.012)); // faint Saturn-shine so shadowed rings never go pitch black
+    .add(albedo.mul(0.016));
 
   material.colorNode = color;
   // Slant path: grazing views traverse more ring material — optical depth

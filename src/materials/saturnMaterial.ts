@@ -3,12 +3,16 @@
  * zonal-jet flow animation, the north-polar hexagon, ring shadows projected
  * from the real ring profile, moon shadow transits, and ringshine lighting
  * the night side (LUT computed per frame from the ring brightness data).
+ *
+ * Ring shadow and moon transits attenuate *direct* sunlight only (via
+ * DirectMaskedStandardMaterial) so ringshine emissive is not darkened by
+ * the shadow bands. Night fill is ringshine only (no AmbientLight — F7.3).
  */
 
 import { Texture } from 'three';
-import { MeshStandardNodeMaterial } from 'three/webgpu';
+import type { MeshStandardNodeMaterial } from 'three/webgpu';
 import {
-  abs, add, atan2, clamp, cos, float, fract, mix, mul,
+  abs, add, atan2, clamp, cos, float, fract, max, min, mix, mul,
   mx_fractal_noise_float, mx_noise_float, oneMinus, positionLocal,
   positionWorld, smoothstep, sqrt, step, texture, uv, vec2, vec3,
 } from 'three/tsl';
@@ -18,6 +22,8 @@ import { cloudPhaseUniform, sunDirUniform } from './sharedUniforms.ts';
 import { moonTransitLight } from './moonTransits.ts';
 import type { RingProfile } from './ringProfile.ts';
 import { KM_PER_UNIT } from '../data/saturn.ts';
+import { SUN_ANGULAR_RADIUS } from '../physics/eclipse.ts';
+import { DirectMaskedStandardMaterial } from './directMaskedLighting.ts';
 
 type NodeObj = ShaderNodeObject<Node>;
 
@@ -103,6 +109,51 @@ function polarHexagon(color: NodeObj): NodeObj {
   return c;
 }
 
+/** Ring-shadow × moon-transit mask for direct sunlight (0..1). */
+function saturnDirectLightMask(profile: RingProfile): NodeObj {
+  const P = positionWorld;
+  const S = sunDirUniform;
+  const innerU = profile.innerKm / KM_PER_UNIT;
+  const outerU = profile.outerKm / KM_PER_UNIT;
+  // Intersection of the ray P -> Sun with the ring plane (y = 0).
+  // Near equinox |S.y|→0: signed-epsilon floor + validity mask (Onda 1 Fix 1.2).
+  const RING_SHADOW_EPS = float(1e-5);
+  const absSy = abs(S.y);
+  // S.y >= 0 → max(S.y, +ε); S.y < 0 → min(S.y, -ε). Always |denom| >= ε.
+  const safeDenom = mix(
+    min(S.y, RING_SHADOW_EPS.negate()),
+    max(S.y, RING_SHADOW_EPS),
+    step(0.0, S.y),
+  );
+  const t = P.y.negate().div(safeDenom);
+  const hx = add(P.x, mul(S.x, t));
+  const hz = add(P.z, mul(S.z, t));
+  const r = sqrt(add(mul(hx, hx), mul(hz, hz)));
+  const ru = r.sub(innerU).div(outerU - innerU);
+  const inside = mul(step(0.0, ru), oneMinus(step(1.0, ru)));
+  const toward = step(0.0, t);
+  // Below epsilon the point-sun plane hit is ill-conditioned — drop it.
+  const valid = step(RING_SHADOW_EPS, absSy);
+
+  // F7.4 — soft penumbra from the solar disk: width at the ring plane is
+  // ~t·θ☉, converted to profile-u and clamped so near-equinox stays stable.
+  const spanU = float(outerU - innerU);
+  const penRu = min(
+    t.mul(float(SUN_ANGULAR_RADIUS)).div(max(spanU, float(1e-3))),
+    float(0.04),
+  );
+  const a0 = texture(profile.texture, vec2(clamp(ru.sub(penRu), 0, 1), 0.5)).a;
+  const a1 = texture(profile.texture, vec2(clamp(ru, 0, 1), 0.5)).a;
+  const a2 = texture(profile.texture, vec2(clamp(ru.add(penRu), 0, 1), 0.5)).a;
+  const ringAlpha = a0.mul(0.25).add(a1.mul(0.5)).add(a2.mul(0.25));
+
+  // Slightly lifted (0.86): the real shadow reads soft, never pitch black.
+  const transmission = oneMinus(ringAlpha.mul(0.86));
+  const ringShadow = mix(1.0, transmission, mul(inside, toward).mul(valid));
+  const transits = moonTransitLight(P);
+  return ringShadow.mul(transits) as NodeObj;
+}
+
 export interface SaturnMaterialResult {
   material: MeshStandardNodeMaterial;
 }
@@ -112,47 +163,26 @@ export function createSaturnMaterial(
   map?: Texture | null,
   ringshineTex?: Texture | null,
 ): MeshStandardNodeMaterial {
-  const material = new MeshStandardNodeMaterial({ roughness: 1.0, metalness: 0.0 });
+  const material = new DirectMaskedStandardMaterial({ roughness: 1.0, metalness: 0.0 });
 
   // Animated real map when available, procedural bands otherwise.
+  // Albedo is unshadowed — ring shadow / moon transits go to directLightMask.
   let color: NodeObj = map ? animatedSurface(map) : proceduralBands(uv());
   color = polarHexagon(color);
-
-  // --- Ring shadow on the globe ---
-  const P = positionWorld;
-  const S = sunDirUniform;
-  const innerU = profile.innerKm / KM_PER_UNIT;
-  const outerU = profile.outerKm / KM_PER_UNIT;
-  // Intersection of the ray P -> Sun with the ring plane (y = 0).
-  const denom = add(S.y, mul(step(abs(S.y), float(1e-5)), 1e-5)); // avoid /0
-  const t = P.y.negate().div(denom);
-  const hx = add(P.x, mul(S.x, t));
-  const hz = add(P.z, mul(S.z, t));
-  const r = sqrt(add(mul(hx, hx), mul(hz, hz)));
-  const ru = r.sub(innerU).div(outerU - innerU);
-  const inside = mul(step(0.0, ru), oneMinus(step(1.0, ru)));
-  const toward = step(0.0, t);
-  const ringAlpha = texture(profile.texture, vec2(clamp(ru, 0, 1), 0.5)).a;
-  // Slightly lifted (0.86): the real shadow reads soft, never pitch black.
-  const transmission = oneMinus(ringAlpha.mul(0.86));
-  const shadow = mix(1.0, transmission, mul(inside, toward));
-
-  // Moon shadow transits crossing the globe (Titan's shadow, etc.).
-  const transits = moonTransitLight(P);
-
-  // ponytail: shadow multiplies albedo instead of the light term — with one
-  // sun and near-zero ambient the visual result is equivalent.
-  material.colorNode = color.mul(shadow).mul(transits);
+  material.colorNode = color;
+  material.directLightMask = saturnDirectLightMask(profile);
 
   // --- Ringshine: the rings light the night side (LUT by latitude) ---
+  // Uses unshadowed albedo so ring-shadow bands never appear in the night glow.
   if (ringshineTex) {
     // LUT: u=0 south .. u=1 north; three's SphereGeometry has uv.y=0 at the
     // SOUTH pole, so the coordinate maps straight through.
     const latU = uv().y;
     const shine = texture(ringshineTex, vec2(latU, 0.5)).r;
     // Strongest where the sun doesn't reach; fades out on the day side.
-    const night = oneMinus(clamp(positionWorld.normalize().dot(S).mul(2.5).add(0.5), 0, 1));
-    material.emissiveNode = color.mul(shine).mul(night).mul(vec3(1.0, 0.94, 0.80)).mul(0.6);
+    const night = oneMinus(clamp(positionWorld.normalize().dot(sunDirUniform).mul(2.5).add(0.5), 0, 1));
+    // Night fill after AmbientLight removal (F7.3) — keep ringshine legible.
+    material.emissiveNode = color.mul(shine).mul(night).mul(vec3(1.0, 0.94, 0.80)).mul(0.92);
   }
 
   return material;

@@ -1,71 +1,183 @@
 /**
- * The Sun: a directional light plus an HDR billboard whose radiance is far
- * above 1.0 — the post pipeline is HalfFloat end-to-end, so physical bloom,
- * anamorphic streaks and lens ghosts all derive from this single source.
+ * The Sun: a single DirectionalLight plus camera-centered billboards.
+ *
+ * F7 — physical display disk + seed-carried glare (no BloomNode square mips):
+ * - Display disk (DISPLAY_SUN_LAYER): small, sharp, limb-darkened photosphere.
+ * - Seed (SOLAR_LAYER): round glare profile painted radially (core + r⁻² skirt)
+ *   and composited directly in the post graph — never through a wide BloomNode.
+ * - solarTintUniform = atmosphere transmittance only (no visibility bake-in).
+ * - Disk and glare both multiply tint × visibility in the graph (lockstep).
  */
 
 import {
-  AdditiveBlending, AmbientLight, CanvasTexture, DirectionalLight, Group,
-  Mesh, PlaneGeometry, SRGBColorSpace, Vector3,
+  AdditiveBlending, DirectionalLight, Group, Mesh, PlaneGeometry, Vector3,
 } from 'three';
 import { SpriteNodeMaterial } from 'three/webgpu';
-import { texture, uv, vec3 } from 'three/tsl';
+import {
+  add, clamp, float, fwidth, max, oneMinus, smoothstep, sqrt, uniform, uv, vec3,
+} from 'three/tsl';
+import { SUN_ANGULAR_RADIUS } from '../physics/eclipse.ts';
+import { sunVisibilityUniform } from '../materials/sharedUniforms.ts';
 
-const SUN_DISTANCE = 24000;
-/** HDR radiance of the solar disk core (feeds bloom/flare physically). */
-const SUN_RADIANCE = 42;
+/** Layer for the solar glare seed (post chain only). */
+export const SOLAR_LAYER = 1;
 
-function makeGlowTexture(): CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0.0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.05, 'rgba(255,252,240,1)');
-  g.addColorStop(0.12, 'rgba(255,238,200,0.35)');
-  g.addColorStop(0.30, 'rgba(255,220,160,0.06)');
-  g.addColorStop(0.46, 'rgba(255,205,130,0)'); // fully out before the quad edge
-  g.addColorStop(1.0, 'rgba(255,205,130,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  return tex;
-}
+/**
+ * Layer for the visible sun disk. Base camera enables 0 + this layer so the
+ * disk shares depth with occluders; bloom camera stays on layer 0 only.
+ */
+export const DISPLAY_SUN_LAYER = 2;
+
+/**
+ * Distance from the camera to the billboards (scene units). Large enough that
+ * the disk sits beyond the solar system and never collides with moons.
+ */
+export const SUN_FOLLOW_DISTANCE = 40000;
+
+/**
+ * Presentation scale over the true angular radius. 1 = physical (~0.057° dia);
+ * 3.5 ≈ readable still-small disk without returning to the old 1° blur blob.
+ */
+export const SUN_APPARENT_SCALE = 3.5;
+
+/** Quad half-extent / disk radius — only a thin AA margin outside the disk. */
+const DISK_PAD = 2.5;
+
+/** Physical disk radius in scene units at the follow distance. */
+export const SUN_DISK_RADIUS =
+  SUN_ANGULAR_RADIUS * SUN_FOLLOW_DISTANCE * SUN_APPARENT_SCALE;
+
+/** Full PlaneGeometry scale for the photosphere billboard. */
+export const SUN_DISK_SCALE = SUN_DISK_RADIUS * 2 * DISK_PAD;
+
+/**
+ * Seed billboard is larger so the r⁻² glare skirt has room in UV space.
+ * Still a radial sprite → round at any FOV (no BloomNode mips).
+ */
+export const SUN_SEED_SCALE = SUN_DISK_SCALE * 7;
+
+/**
+ * Display-path core radiance (linear, before AgX @ exposure 1.4).
+ * Calibrated to saturate the disk centre under clear sky; limb extinction
+ * must pull this down into the AgX shoulder for orange sunsets.
+ */
+export const SUN_DISPLAY_RADIANCE = 90;
+
+/** Seed core / skirt linear peaks (glare energy for direct composite). */
+export const SUN_SEED_CORE_RADIANCE = 28;
+export const SUN_SEED_SKIRT_RADIANCE = 3.5;
+
+/** @deprecated alias — peak seed energy for selfchecks. */
+export const SUN_SEED_RADIANCE = SUN_SEED_CORE_RADIANCE;
+
+/** UV radius of the physical disk within the padded quad (0.5 / DISK_PAD). */
+export const SUN_DISK_UV_RADIUS = 0.5 / DISK_PAD;
+
+/**
+ * Atmosphere transmittance only (RGB). Visibility is applied separately so
+ * disk and glare share one routing: × tint × sunVisibility.
+ */
+export const solarTintUniform = uniform(new Vector3(1, 1, 1));
 
 export class Sun {
   readonly group = new Group();
   readonly light: DirectionalLight;
-  private readonly disk: Mesh;
+  /** Visible sun (DISPLAY_SUN_LAYER — depth-tested in the base pass). */
+  readonly disk: Mesh;
+  /** Round glare carrier for the solar-only post pass (SOLAR_LAYER). */
+  readonly seed: Mesh;
 
   constructor() {
-    this.light = new DirectionalLight(0xfff4e0, 3.2);
+    // Sole direct light for the whole system (warm ~5800 K-ish).
+    this.light = new DirectionalLight(0xfff1e0, 3.4);
     this.group.add(this.light);
     this.group.add(this.light.target);
+    // F7.3: no AmbientLight — night is ringshine / saturnshine only.
 
-    // Very low fill so night sides are not absolute black on screen.
-    this.group.add(new AmbientLight(0x8898b0, 0.035));
+    // --- Display disk: sharp limb-darkened photosphere ---
+    {
+      const material = new SpriteNodeMaterial();
+      material.transparent = true;
+      material.blending = AdditiveBlending;
+      material.depthWrite = false;
+      material.depthTest = true;
 
-    // HDR sun disk: radiance >> 1 so bloom/lensflare are physically driven.
-    const material = new SpriteNodeMaterial();
-    material.transparent = true;
-    material.blending = AdditiveBlending;
-    material.depthWrite = false;
-    const glow = texture(makeGlowTexture(), uv());
-    material.colorNode = glow.rgb.mul(vec3(1.0, 0.97, 0.92)).mul(SUN_RADIANCE);
-    material.opacityNode = glow.a;
+      const r = uv().sub(0.5).length();
+      const R = float(SUN_DISK_UV_RADIUS);
+      const fw = max(fwidth(r), float(1e-4));
+      const diskMask = oneMinus(smoothstep(R.sub(fw), R.add(fw), r));
 
-    this.disk = new Mesh(new PlaneGeometry(1, 1), material);
-    this.disk.scale.setScalar(1400);
-    this.disk.frustumCulled = false;
-    this.group.add(this.disk);
+      const rho = clamp(r.div(R), 0, 1);
+      const mu = sqrt(max(float(0), oneMinus(rho.mul(rho))));
+      const limb = vec3(
+        oneMinus(float(0.72).mul(oneMinus(mu))),
+        oneMinus(float(0.58).mul(oneMinus(mu))),
+        oneMinus(float(0.42).mul(oneMinus(mu))),
+      );
+
+      // Photosphere × limb × HDR × atmosphere × visibility (same gate as glare).
+      const photosphere = vec3(1.0, 0.96, 0.90);
+      material.colorNode = photosphere
+        .mul(limb)
+        .mul(SUN_DISPLAY_RADIANCE)
+        .mul(solarTintUniform)
+        .mul(sunVisibilityUniform)
+        .mul(diskMask);
+      material.opacityNode = diskMask;
+
+      this.disk = new Mesh(new PlaneGeometry(1, 1), material);
+      this.disk.scale.setScalar(SUN_DISK_SCALE);
+      this.disk.frustumCulled = false;
+      // After atmosphere shells so normal-blend haze cannot cut a black hole.
+      this.disk.renderOrder = 1000;
+      this.disk.layers.set(DISPLAY_SUN_LAYER);
+      this.group.add(this.disk);
+    }
+
+    // --- Glare seed: round by construction (core + Lorentzian skirt) ---
+    {
+      const material = new SpriteNodeMaterial();
+      material.transparent = true;
+      material.blending = AdditiveBlending;
+      material.depthWrite = false;
+      material.depthTest = false;
+
+      const r = uv().sub(0.5).length();
+      // Tight core (the star point).
+      const core = oneMinus(smoothstep(float(0.0), float(0.055), r));
+      const core2 = core.mul(core);
+      // Wide warm skirt ~ 1/(1+(kr)²), windowed to exact 0 at the quad edge
+      // so FOV-close never shows a faint square frame (Lorentz ~1% at r=0.5).
+      const kr = r.mul(20);
+      const lorentz = float(1).div(add(float(1), kr.mul(kr)));
+      const edgeVal = float(1 / (1 + 10 * 10)); // Lorentz at r=0.5
+      const skirt = max(float(0), lorentz.sub(edgeVal)).div(float(1).sub(edgeVal));
+      const warm = vec3(1.0, 0.94, 0.82);
+      const energy = core2.mul(SUN_SEED_CORE_RADIANCE).add(skirt.mul(SUN_SEED_SKIRT_RADIANCE));
+      // Pure energy — Engine multiplies tint × visibility once for glow/flare.
+      material.colorNode = warm.mul(energy);
+      material.opacityNode = clamp(core2.add(skirt.mul(0.85)), 0, 1);
+
+      this.seed = new Mesh(new PlaneGeometry(1, 1), material);
+      this.seed.scale.setScalar(SUN_SEED_SCALE);
+      this.seed.frustumCulled = false;
+      this.seed.renderOrder = -1;
+      this.seed.layers.set(SOLAR_LAYER);
+      this.group.add(this.seed);
+    }
   }
 
-  /** Point the light and disk along the (unit) sun direction. */
-  update(sunDir: Vector3): void {
+  /**
+   * Align light (infinite) and both billboards (camera-centered along sunDir).
+   * Call **after** the frame's final camera pose is known.
+   */
+  update(sunDir: Vector3, cameraPos: Vector3): void {
     this.light.position.copy(sunDir).multiplyScalar(1000);
     this.light.target.position.set(0, 0, 0);
-    this.disk.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
+    this.light.target.updateMatrixWorld();
+
+    const pos = cameraPos.clone().addScaledVector(sunDir, SUN_FOLLOW_DISTANCE);
+    this.disk.position.copy(pos);
+    this.seed.position.copy(pos);
   }
 }

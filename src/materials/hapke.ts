@@ -11,6 +11,9 @@
  * LightingModel subclass (setupLightingModel hook on the node material),
  * so eclipse factors, emissive saturnshine and the sun DirectionalLight
  * keep working unchanged.
+ *
+ * Eclipse / ring-shadow on moons multiplies lightColor inside direct() only
+ * (Onda 2) — albedo and saturnshine emissive stay unmasked.
  */
 
 import { LightingModel, MeshStandardNodeMaterial } from 'three/webgpu';
@@ -40,8 +43,14 @@ export const DEFAULT_HAPKE: HapkeParams = {
 };
 
 class HapkeLightingModel extends LightingModel {
-  constructor(private readonly params: HapkeParams) {
+  private readonly params: HapkeParams;
+  /** 0..1 sunlight fraction (Saturn umbra + ring opacity). */
+  private readonly directMask: Node;
+
+  constructor(params: HapkeParams, directMask: Node = float(1)) {
     super();
+    this.params = params;
+    this.directMask = directMask;
   }
 
   direct({ lightDirection, lightColor, reflectedLight }: LightingModelDirectInput): void {
@@ -50,6 +59,11 @@ class HapkeLightingModel extends LightingModel {
     const L = lightDirection;
     const V = positionViewDirection;
 
+    // Eclipse / ring shadow: attenuate direct irradiance only (not albedo).
+    const maskedLight = (lightColor as unknown as ShaderNodeObject<Node>).mul(
+      this.directMask as unknown as ShaderNodeObject<Node>,
+    );
+
     const mu0 = max(dot(N, L), 0.0);
     const mu = max(dot(N, V), 0.0);
 
@@ -57,6 +71,8 @@ class HapkeLightingModel extends LightingModel {
     const ls = mu0.div(mu0.add(mu).add(1e-4));
 
     // Phase angle between sun and viewer.
+    // NOTE: HG convention with g<0 currently peaks at high phase — known
+    // Onda 4+/Hapke retune item; do NOT change here (Onda 2 scope).
     const cosg = clamp(dot(L, V), -1.0, 1.0);
     const g = acos(cosg);
 
@@ -70,7 +86,7 @@ class HapkeLightingModel extends LightingModel {
 
     const brdf = ls.mul(surge).mul(phase).mul(p.gain * 4 * Math.PI);
     (reflectedLight.directDiffuse as unknown as ShaderNodeObject<Node>).addAssign(
-      diffuseColor.rgb.mul(lightColor).mul(brdf),
+      diffuseColor.rgb.mul(maskedLight).mul(brdf),
     );
   }
 
@@ -81,6 +97,8 @@ class HapkeLightingModel extends LightingModel {
 /** MeshStandardNodeMaterial that shades with the Hapke model instead of PBR. */
 export class MoonNodeMaterial extends MeshStandardNodeMaterial {
   hapkeParams: HapkeParams;
+  /** Direct-sunlight mask (eclipse/ring shadow). Does not affect emissive. */
+  directLightMask: Node = float(1);
 
   constructor(params: Partial<HapkeParams> = {}) {
     super({ roughness: 1, metalness: 0 });
@@ -90,6 +108,9 @@ export class MoonNodeMaterial extends MeshStandardNodeMaterial {
   override setupLightingModel(): PhysicalLightingModel {
     // The base type promises PhysicalLightingModel; any LightingModel works
     // at runtime — the hook only calls direct()/indirect().
-    return new HapkeLightingModel(this.hapkeParams) as unknown as PhysicalLightingModel;
+    return new HapkeLightingModel(
+      this.hapkeParams,
+      this.directLightMask,
+    ) as unknown as PhysicalLightingModel;
   }
 }
