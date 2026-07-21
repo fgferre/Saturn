@@ -96,7 +96,12 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   const spokeNoise = mx_fractal_noise_float(
     vec3(cos(ang).mul(2.5), sin(ang).mul(2.5), rr.mul(9)), 3, 2.0, 0.5,
   ).mul(0.5).add(0.5);
-  const spoke = smoothstep(0.62, 0.85, spokeNoise).mul(bMask).mul(0.13);
+  // Spokes are a near-equinox phenomenon: they fade as the Sun climbs above
+  // the ring plane (unobservable by solar elevation ≳ 15–17°). sin 17° ≈ 0.29
+  // (⚠ VERIFICAR: fotos Cassini 2009–2010). In 2026 (1yr post-equinox) the
+  // elevation is only ~6–7° → season ≈ 1, strong spokes as the comment notes.
+  const season = oneMinus(smoothstep(0.17, 0.29, abs(S.y)));
+  const spoke = smoothstep(0.62, 0.85, spokeNoise).mul(bMask).mul(0.13).mul(season);
   face = face.mul(oneMinus(spoke.mul(sameSide)));
   fwd = add(fwd, spoke.mul(0.5).mul(alpha));
 
