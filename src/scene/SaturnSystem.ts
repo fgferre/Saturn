@@ -97,6 +97,73 @@ function hyperionGeometry(): IcosahedronGeometry {
   return geo;
 }
 
+/**
+ * Ravioli moon (Pan / Atlas / Daphnis): an oblate body girdled by a smooth
+ * equatorial accretion ridge of swept-up ring particles — the signature
+ * "flying saucer" silhouette (Pan PIA21446, Atlas PIA21449). The ridge sits in
+ * the equatorial (XZ) plane, so under tidal-lock rotation.y it always faces the
+ * rings. Aspect ratio ~2:1 (equatorial vs polar). ⚠ VERIFICAR: Pan ~34×31×21 km,
+ * Atlas ~41×35×19 km (Thomas et al. 2018, Cassini).
+ */
+function ravioliGeometry(): IcosahedronGeometry {
+  const geo = new IcosahedronGeometry(1, 4);
+  const pos = geo.attributes.position;
+  const v = new Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    // cos(latitude): 1 at the equator, 0 at the poles.
+    const equator = Math.hypot(v.x, v.z);
+    // Gentle lumpiness so the disk isn't a perfect solid of revolution.
+    const lump = 1 + (fbm3D(v.x * 2.2 + 5, v.y * 2.2, v.z * 2.2, 3, 6) - 0.5) * 0.12;
+    // Additive equatorial crest: sharply peaked at the equator (cos^6),
+    // vanishing by mid-latitude — the raised accretion ridge.
+    const crest = 0.44 * Math.pow(equator, 6);
+    const r = (1 + crest) * lump;
+    // Horizontal radius carries the ridge; the polar axis is squashed → the
+    // wide-brimmed "ravioli" (equatorial ~1.44 vs polar ~0.6 ⇒ ~2:1).
+    pos.setXYZ(i, v.x * r, v.y * 0.6 * lump, v.z * r);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Generic irregular shepherd / co-orbital (Prometheus, Pandora, Janus,
+ * Epimetheus): an elongated lumpy potato — hyperionGeometry's fractal profile
+ * without the giant impact cup. `seed` decorrelates the four so they don't read
+ * as clones. Elongated along local X (Prometheus is ~2:1: 136×79×59 km).
+ */
+function irregularMoonGeometry(seed: number): IcosahedronGeometry {
+  const geo = new IcosahedronGeometry(1, 4);
+  const pos = geo.attributes.position;
+  const v = new Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    const r = 1 + (fbm3D(v.x * 1.7 + seed, v.y * 1.7 + seed, v.z * 1.7, 4, 6) - 0.5) * 0.5;
+    pos.setXYZ(i, v.x * r * 1.32, v.y * r * 0.74, v.z * r * 0.92); // tri-axial, elongated X
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Phoebe: a relaxed ex-centaur, nearly spherical with only subtle relief —
+ * emphatically NOT lobed (unlike the small inner shepherds). Round body, barely
+ * oblate, gentle cratered texture; the dark albedo comes from its material.
+ */
+function phoebeGeometry(): IcosahedronGeometry {
+  const geo = new IcosahedronGeometry(1, 4);
+  const pos = geo.attributes.position;
+  const v = new Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    const r = 1 + (fbm3D(v.x * 3.1 + 2, v.y * 3.1, v.z * 3.1, 4, 6) - 0.5) * 0.13;
+    pos.setXYZ(i, v.x * r, v.y * r * 0.96, v.z * r); // barely oblate, no lobes
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function orbitLine(def: BodyDefinition): Line {
   const pts = sampleOrbit(def.elements!, 360);
   const arr = new Float32Array(pts.length * 3);
@@ -273,17 +340,28 @@ export class SaturnSystem {
       }
     }
 
-    // --- Minor moons + Phoebe (F11.1) ---
+    // --- Minor moons + Phoebe (F11.1 / F11.1b) ---
     // No shadow slots (MOON_SHADOW_COUNT stays 8) and no LOD swapping — they
     // still darken/redden in the umbra via eclipseLight/eclipseTint and draw
-    // orbit lines. Placeholder shared sphere for now; the ravioli/irregular/
-    // Phoebe silhouettes land in F11.1b. Phoebe gets a dark builder material.
+    // orbit lines. Real silhouettes by shape class (F11.1b): Pan/Atlas/Daphnis
+    // are the equatorial-ridge "ravioli"; Prometheus/Pandora/Janus/Epimetheus
+    // are generic elongated irregulars; Phoebe is near-spherical (dark builder
+    // material). Built once and shared per class — minor moons never LOD-swap.
+    const ravioliGeom = ravioliGeometry();
+    const irregularGeomA = irregularMoonGeometry(11);
+    const irregularGeomB = irregularMoonGeometry(29);
+    const phoebeGeom = phoebeGeometry();
+    const raviolis = new Set(['pan', 'atlas', 'daphnis']);
+    const irregularsA = new Set(['prometheus', 'janus']); // paired with B below
     for (const def of MINOR_MOONS) {
       const radius = toUnits(def.physical.radiusKm);
       const eclipseLight = uniform(1);
       const eclipseTint = uniform(new Vector3(1, 1, 1));
+      const geom = def.id === 'phoebe' ? phoebeGeom
+        : raviolis.has(def.id) ? ravioliGeom
+        : irregularsA.has(def.id) ? irregularGeomA : irregularGeomB;
       const mesh = new Mesh(
-        this.moonGeomLow,
+        geom,
         createMoonMaterial(def.id, null, eclipseTint),
       );
       mesh.scale.setScalar(radius);

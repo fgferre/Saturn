@@ -36,6 +36,12 @@ export interface HudCallbacks {
   onShare(): string;
 }
 
+/** A labelled section of the body selector (e.g. "Major" / "Minor"). */
+export interface BodyGroup {
+  label: string;
+  bodies: BodyDefinition[];
+}
+
 /** Live, camera-relative readouts refreshed a couple times a second. */
 export interface LiveInfo {
   distanceKm?: number;
@@ -118,7 +124,7 @@ export class Hud {
   private lastDate = new Date();
   private toastTimer?: ReturnType<typeof setTimeout>;
 
-  constructor(bodies: BodyDefinition[], backend: string, cb: HudCallbacks) {
+  constructor(groups: BodyGroup[], backend: string, cb: HudCallbacks) {
     const hud = document.createElement('div');
     hud.id = 'hud';
     document.body.appendChild(hud);
@@ -137,15 +143,22 @@ export class Hud {
     this.fpsEl = brand.querySelector('.fps')!;
     this.dprEl = brand.querySelector('.dpr')!;
 
-    // Body list.
+    // Body list, split into labelled sections (Major / Minor). The panel
+    // already scrolls (hud.css .hud-bodies overflow-y) for the longer list.
     const list = document.createElement('div');
     list.className = 'panel hud-bodies';
-    for (const def of bodies) {
-      const btn = document.createElement('button');
-      btn.textContent = def.name;
-      btn.addEventListener('click', () => cb.onFocus(def.id));
-      list.appendChild(btn);
-      this.bodyButtons.set(def.id, btn);
+    for (const group of groups) {
+      const header = document.createElement('div');
+      header.className = 'hud-bodies-header';
+      header.textContent = group.label;
+      list.appendChild(header);
+      for (const def of group.bodies) {
+        const btn = document.createElement('button');
+        btn.textContent = def.name;
+        btn.addEventListener('click', () => cb.onFocus(def.id));
+        list.appendChild(btn);
+        this.bodyButtons.set(def.id, btn);
+      }
     }
     hud.appendChild(list);
 

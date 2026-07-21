@@ -76,6 +76,17 @@
   max-height: 70vh;
   overflow-y: auto;
 }
+.hud-bodies-header {
+  padding: 6px 12px 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+  opacity: 0.7;
+}
+/* Tighten the gap above the first header so it hugs the panel top. */
+.hud-bodies-header:first-child { padding-top: 2px; }
 .hud-bodies button {
   all: unset;
   cursor: pointer;

@@ -255,7 +255,10 @@ async function boot(): Promise<void> {
     }
   });
 
-  const hud = new Hud(allBodies, engine.backendName, {
+  const hud = new Hud([
+    { label: 'Major', bodies: [SATURN, ...MOONS] },
+    { label: 'Minor', bodies: MINOR_MOONS },
+  ], engine.backendName, {
     onFocus: focusBody,
     onSpeed: (v) => { clock.speed = v; scheduleUrlWrite(); },
     onPause: (p) => { clock.paused = p; scheduleUrlWrite(); },
