@@ -14,7 +14,12 @@
   color: var(--hud-text);
   user-select: none;
   font-size: 13px;
+  transition: opacity 0.4s;
 }
+
+/* H key hides the whole HUD (panels fade, input passes through to the scene). */
+#hud.hud-hidden { opacity: 0; }
+#hud.hud-hidden .panel { pointer-events: none; }
 
 #hud .panel {
   pointer-events: auto;

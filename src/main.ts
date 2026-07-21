@@ -18,8 +18,9 @@ import {
 } from './physics/eclipse.ts';
 import { solarTintUniform } from './scene/Sun.ts';
 import { KM_PER_UNIT, MOONS, SATURN } from './data/saturn.ts';
-import { Hud } from './ui/hud.ts';
+import { Hud, SPEED_VALUES } from './ui/hud.ts';
 import { BodyLabels } from './ui/labels.ts';
+import { Cinema } from './ui/cinema.ts';
 import { autoTuneDown, quality } from './core/quality.ts';
 
 async function boot(): Promise<void> {
@@ -98,52 +99,47 @@ async function boot(): Promise<void> {
     onCinema: () => cinema.enter(),
   });
 
-  // --- Cinema mode: HUD fades out, slow drift, timed tour between bodies ---
-  const cinema = {
-    active: false,
-    timer: 0,
-    stop: 0,
-    wasDrifting: false,
-    stops: ['saturn', 'enceladus', 'titan', 'mimas', 'iapetus', 'saturn'],
-    exitEl: (() => {
-      const el = document.createElement('div');
-      el.className = 'cinema-exit';
-      el.textContent = 'Esc to exit';
-      document.body.appendChild(el);
-      return el;
-    })(),
-    enter() {
-      this.active = true;
-      this.timer = 0;
-      this.stop = 0;
-      this.wasDrifting = controls.controls.autoRotate;
-      document.body.classList.add('cinema');
-      controls.controls.autoRotate = true;
-      controls.controls.autoRotateSpeed = 0.25;
-      focusBody(this.stops[0]);
-    },
-    exit() {
-      if (!this.active) return;
-      this.active = false;
-      document.body.classList.remove('cinema');
-      // Restore the pre-cinema drift state so the HUD checkbox stays truthful.
-      controls.controls.autoRotate = this.wasDrifting;
-      controls.controls.autoRotateSpeed = 0.12;
-    },
-    update(dt: number) {
-      if (!this.active) return;
-      this.timer += dt;
-      if (this.timer > 22) {
-        this.timer = 0;
-        this.stop = (this.stop + 1) % this.stops.length;
-        focusBody(this.stops[this.stop]);
-      }
-    },
-  };
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') cinema.exit(); });
+  // Cinema mode (HUD fades, slow drift, timed tour) lives in its own module
+  // and owns the Esc-to-exit listener.
+  const cinema = new Cinema({ controls, focusBody });
   const labels = new BodyLabels(allBodies, focusBody);
   hud.setFocused('saturn');
   hud.setInfo(SATURN);
+
+  // --- Global keyboard shortcuts (Esc handled inside Cinema) ---
+  // Ignore key events aimed at focusable controls so typing/activating them
+  // never doubles as a shortcut.
+  const hudRoot = document.getElementById('hud');
+  window.addEventListener('keydown', (e) => {
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    switch (e.key) {
+      case ' ': // Space: pause / resume, kept in sync with the HUD button.
+        e.preventDefault();
+        clock.paused = !clock.paused;
+        hud.setPaused(clock.paused);
+        break;
+      case '[':
+      case ']': { // Step through the speed presets, highlighting the HUD.
+        const dir = e.key === ']' ? 1 : -1;
+        let i = SPEED_VALUES.indexOf(clock.speed);
+        if (i < 0) i = SPEED_VALUES.indexOf(3600);
+        i = Math.max(0, Math.min(SPEED_VALUES.length - 1, i + dir));
+        clock.speed = SPEED_VALUES[i];
+        hud.setSpeed(clock.speed);
+        break;
+      }
+      case 'h':
+      case 'H': // Toggle HUD visibility.
+        hudRoot?.classList.toggle('hud-hidden');
+        break;
+      case 'f':
+      case 'F': // Toggle fullscreen.
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+        else document.exitFullscreen?.();
+        break;
+    }
+  });
 
   const sunDir = new Vector3();
   const camDist = new Vector3();

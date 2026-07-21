@@ -35,6 +35,8 @@ function fmtAngle(deg: number): string {
 }
 
 const SPEEDS: { label: string; value: number }[] = [
+  { label: '-1 d/s', value: -86400 },
+  { label: '-1 h/s', value: -3600 },
   { label: '1×', value: 1 },
   { label: '1 min/s', value: 60 },
   { label: '1 h/s', value: 3600 },
@@ -42,6 +44,12 @@ const SPEEDS: { label: string; value: number }[] = [
   { label: '1 d/s', value: 86400 },
   { label: '5 d/s', value: 432000 },
 ];
+
+/** Default active preset (matches SimClock's initial speed). */
+const DEFAULT_SPEED = 3600;
+
+/** Ordered preset values — shared with the keyboard `[`/`]` speed stepper. */
+export const SPEED_VALUES: number[] = SPEEDS.map((s) => s.value);
 
 export class Hud {
   private readonly dateEl: HTMLElement;
@@ -110,7 +118,7 @@ export class Hud {
       this.speedButtons.push(btn);
     }
     // Default: 1 h/s.
-    this.speedButtons[2].classList.add('active');
+    this.setSpeed(DEFAULT_SPEED);
 
     bar.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
     const nowBtn = document.createElement('button');
@@ -165,6 +173,17 @@ export class Hud {
 
   setFocused(id: string): void {
     for (const [bid, btn] of this.bodyButtons) btn.classList.toggle('active', bid === id);
+  }
+
+  /** Reflect the paused state in the pause button (keyboard/programmatic sync). */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    this.pauseBtn.textContent = paused ? '▶' : '⏸';
+  }
+
+  /** Highlight the preset matching `value` (keyboard/programmatic sync). */
+  setSpeed(value: number): void {
+    this.speedButtons.forEach((b, i) => b.classList.toggle('active', SPEEDS[i].value === value));
   }
 
   setInfo(def: BodyDefinition, live?: LiveInfo): void {
