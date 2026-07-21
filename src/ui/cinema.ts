@@ -6,6 +6,20 @@
 
 import type { FocusControls } from '../camera/FocusControls.ts';
 
+/**
+ * F12.3 — accessibility. Users who ask the OS for reduced motion get no
+ * automatic camera movement: Drift never turns itself on, and Cinema, even when
+ * launched by hand, holds a still frame instead of drifting and auto-touring.
+ * Read live (never cached) so a mid-session OS change is honoured.
+ */
+const reducedMotionQuery =
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null;
+export function prefersReducedMotion(): boolean {
+  return reducedMotionQuery?.matches ?? false;
+}
+
 export interface CinemaDeps {
   controls: FocusControls;
   focusBody(id: string): void;
@@ -42,7 +56,8 @@ export class Cinema {
     this.stop = 0;
     this.wasDrifting = this.controls.controls.autoRotate;
     document.body.classList.add('cinema');
-    this.controls.controls.autoRotate = true;
+    // Reduced motion: hold a still, HUD-free frame — no drift, no auto-tour.
+    this.controls.controls.autoRotate = !prefersReducedMotion();
     this.controls.controls.autoRotateSpeed = 0.25;
     this.focusBody(STOPS[0]);
   }
@@ -57,7 +72,8 @@ export class Cinema {
   }
 
   update(dt: number): void {
-    if (!this.active) return;
+    // Reduced motion suppresses the auto-tour: the view stays on the first stop.
+    if (!this.active || prefersReducedMotion()) return;
     this.timer += dt;
     if (this.timer > STOP_SECONDS) {
       this.timer = 0;

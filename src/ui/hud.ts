@@ -162,6 +162,9 @@ export class Hud {
     hud.appendChild(brand);
     this.fpsEl = brand.querySelector('.fps')!;
     this.dprEl = brand.querySelector('.dpr')!;
+    // Live frame-rate readout announced as a status region.
+    this.fpsEl.setAttribute('role', 'status');
+    this.fpsEl.setAttribute('aria-live', 'polite');
 
     // Body list, split into labelled sections (Major / Minor). The panel
     // already scrolls (hud.css .hud-bodies overflow-y) for the longer list.
@@ -190,9 +193,10 @@ export class Hud {
     this.pauseBtn = document.createElement('button');
     this.pauseBtn.textContent = '⏸';
     this.pauseBtn.title = 'Pause / resume simulation';
+    this.pauseBtn.setAttribute('aria-label', 'Pause simulation');
     this.pauseBtn.addEventListener('click', () => {
       this.paused = !this.paused;
-      this.pauseBtn.textContent = this.paused ? '▶' : '⏸';
+      this.syncPauseButton();
       cb.onPause(this.paused);
     });
     bar.appendChild(this.pauseBtn);
@@ -204,6 +208,13 @@ export class Hud {
     this.dateEl.tabIndex = 0;
     this.dateEl.setAttribute('role', 'button');
     this.dateEl.title = 'Click to set a date (UTC)';
+    this.dateEl.setAttribute('aria-label', 'Simulation date, click to edit');
+    // Announce the advancing date to screen readers. Kept on the button (rather
+    // than swapping its role to "status", which would hide that it's editable):
+    // the element stays keyboard-reachable AND its updates are read out. Polite
+    // so it never interrupts, and only coalesces the latest value when idle.
+    this.dateEl.setAttribute('aria-live', 'polite');
+    this.dateEl.setAttribute('aria-atomic', 'true');
     const openDateEditor = (): void => {
       if (this.editing) return;
       this.editing = true;
@@ -282,27 +293,27 @@ export class Hud {
     info.className = 'panel hud-info';
     info.innerHTML = `<h2></h2><div class="blurb"></div><div class="stats"></div>
       <div class="hud-toggles">
-        <label><input type="checkbox" data-t="orbits">Orbits</label>
-        <label><input type="checkbox" checked data-t="labels">Labels</label>
-        <label><input type="checkbox" data-t="drift">Drift</label>
+        <label><input type="checkbox" data-t="orbits" aria-label="Show orbit paths">Orbits</label>
+        <label><input type="checkbox" checked data-t="labels" aria-label="Show body labels">Labels</label>
+        <label><input type="checkbox" data-t="drift" aria-label="Slow camera drift">Drift</label>
       </div>
       <div class="hud-exposure">
         <span>EV</span>
-        <input type="range" min="0.5" max="2.6" step="0.05" value="1.4" data-t="exposure">
+        <input type="range" min="0.5" max="2.6" step="0.05" value="1.4" data-t="exposure" aria-label="Exposure value">
       </div>
       <div class="hud-exposure">
         <span>FOV</span>
-        <input type="range" min="${FOV_MIN}" max="${FOV_MAX}" step="1" value="${FOV_DEFAULT}" data-t="fov">
+        <input type="range" min="${FOV_MIN}" max="${FOV_MAX}" step="1" value="${FOV_DEFAULT}" data-t="fov" aria-label="Field of view (degrees)">
       </div>
       <div class="hud-quality">
         <span>Quality</span>
         <div class="hud-quality-btns"></div>
-        <button type="button" class="hud-cinema" title="Cinematic tour (Esc exits)">✦ Cinema</button>
+        <button type="button" class="hud-cinema" title="Cinematic tour (Esc exits)" aria-label="Start cinematic tour">✦ Cinema</button>
       </div>
       <div class="hud-actions">
-        <button type="button" class="hud-photo" title="Save a sharp 1920px PNG of the current view">📷 Photo</button>
-        <button type="button" class="hud-record" title="Record a 10-second WebM video of the current view">⏺ Record 10s</button>
-        <button type="button" class="hud-share" title="Copy a shareable link to this exact view">🔗 Share</button>
+        <button type="button" class="hud-photo" title="Save a sharp 1920px PNG of the current view" aria-label="Save a photo">📷 Photo</button>
+        <button type="button" class="hud-record" title="Record a 10-second WebM video of the current view" aria-label="Record a 10 second video">⏺ Record 10s</button>
+        <button type="button" class="hud-share" title="Copy a shareable link to this exact view" aria-label="Copy a shareable link">🔗 Share</button>
       </div>`;
     hud.appendChild(info);
     this.infoName = info.querySelector('h2')!;
@@ -473,7 +484,15 @@ export class Hud {
   /** Reflect the paused state in the pause button (keyboard/programmatic sync). */
   setPaused(paused: boolean): void {
     this.paused = paused;
-    this.pauseBtn.textContent = paused ? '▶' : '⏸';
+    this.syncPauseButton();
+  }
+
+  /** Keep the pause button glyph and its screen-reader label in lockstep. */
+  private syncPauseButton(): void {
+    this.pauseBtn.textContent = this.paused ? '▶' : '⏸';
+    this.pauseBtn.setAttribute(
+      'aria-label', this.paused ? 'Resume simulation' : 'Pause simulation',
+    );
   }
 
   /** Highlight the preset matching `value` (keyboard/programmatic sync). */

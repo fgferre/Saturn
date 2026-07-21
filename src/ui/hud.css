@@ -448,3 +448,14 @@ body.cinema .cinema-exit { opacity: 1; }
   .hud-events { display: none; }
   .hud-bodies { max-height: 46vh; }
 }
+
+/* F12.3 — reduced motion: collapse HUD fades/slides to near-instant so no UI
+   animates for users who ask the OS for less movement. Focus outlines (not
+   transitions) are untouched, so keyboard focus stays clearly visible. */
+@media (prefers-reduced-motion: reduce) {
+  #hud, #hud *, .body-label, .cinema-exit {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
