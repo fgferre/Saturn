@@ -62,23 +62,37 @@ export interface BodyMaps {
 
 const MOON_MAP_IDS = ['mimas', 'enceladus', 'tethys', 'dione', 'rhea', 'iapetus'] as const;
 
-/** Kick off all loads in parallel; missing files simply resolve to null. */
-export async function loadAllMaps(): Promise<BodyMaps> {
+/**
+ * Kick off all loads in parallel; missing files simply resolve to null.
+ * `onProgress(done, total)` fires as each asset settles (for the boot screen).
+ */
+export async function loadAllMaps(
+  onProgress?: (done: number, total: number) => void,
+): Promise<BodyMaps> {
   const base = `${import.meta.env.BASE_URL}textures/`;
   const reliefBase = `${base}relief/`;
+
+  // 5 singletons (saturn, 2 ring bins, starmap, relief.json) + 3 sets of moon maps.
+  const total = 5 + MOON_MAP_IDS.length * 3;
+  let done = 0;
+  const track = <T>(p: Promise<T>): Promise<T> => {
+    // Side-channel tick — these promises never reject, but count either way.
+    p.then(() => onProgress?.(++done, total), () => onProgress?.(++done, total));
+    return p;
+  };
 
   const reliefMetaP: Promise<Record<string, { scale: number; bias: number }> | null> =
     fetch(`${reliefBase}relief.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
   const [saturn, ringProfile, ringScatter, starmap, reliefMeta, ...moonTex] = await Promise.all([
-    tryLoadTexture(`${base}saturn.jpg`),
-    tryFetchBin(`${base}rings_profile.bin`),
-    tryFetchBin(`${base}rings_scatter.bin`),
-    tryLoadTexture(`${base}starmap.jpg`),
-    reliefMetaP,
-    ...MOON_MAP_IDS.map((id) => tryLoadTexture(`${base}${id}.jpg`)),
-    ...MOON_MAP_IDS.map((id) => tryLoadTexture(`${reliefBase}${id}_height.png`, NoColorSpace)),
-    ...MOON_MAP_IDS.map((id) => tryLoadTexture(`${reliefBase}${id}_normal.png`, NoColorSpace)),
+    track(tryLoadTexture(`${base}saturn.jpg`)),
+    track(tryFetchBin(`${base}rings_profile.bin`)),
+    track(tryFetchBin(`${base}rings_scatter.bin`)),
+    track(tryLoadTexture(`${base}starmap.jpg`)),
+    track(reliefMetaP),
+    ...MOON_MAP_IDS.map((id) => track(tryLoadTexture(`${base}${id}.jpg`))),
+    ...MOON_MAP_IDS.map((id) => track(tryLoadTexture(`${reliefBase}${id}_height.png`, NoColorSpace))),
+    ...MOON_MAP_IDS.map((id) => track(tryLoadTexture(`${reliefBase}${id}_normal.png`, NoColorSpace))),
   ]);
 
   const nMoons = MOON_MAP_IDS.length;

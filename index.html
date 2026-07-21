@@ -14,10 +14,60 @@
       html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
       #app { position: fixed; inset: 0; }
       #app canvas { display: block; }
+
+      /* Boot overlay — inlined so it paints on first frame, before the module
+         bundle parses. JS updates the bar and fades it out when maps finish. */
+      #boot {
+        position: fixed; inset: 0; z-index: 10;
+        display: grid; place-items: center;
+        background: #05070c; overflow: hidden;
+        opacity: 1; transition: opacity 0.9s ease;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: #dfe6ee;
+      }
+      #boot::before {
+        content: ''; position: absolute; inset: -48px;
+        background: url(./brand/hero.jpg) center/cover no-repeat;
+        filter: blur(30px) brightness(0.32) saturate(1.15);
+      }
+      #boot.done { opacity: 0; pointer-events: none; }
+      .boot-inner { position: relative; text-align: center; width: min(340px, 76vw); }
+      .boot-title {
+        font-size: 2.6rem; font-weight: 200; letter-spacing: 0.42em;
+        margin-left: 0.42em; /* optical centering for tracked caps */
+      }
+      .boot-sub {
+        font-size: 0.7rem; letter-spacing: 0.28em; text-transform: uppercase;
+        opacity: 0.55; margin-top: 0.5rem;
+      }
+      .boot-track {
+        margin-top: 1.8rem; height: 2px; border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12); overflow: hidden;
+      }
+      .boot-bar {
+        height: 100%; width: 0%; border-radius: 2px;
+        background: linear-gradient(90deg, #b98a4e, #e9d6ad);
+        transition: width 0.25s ease;
+      }
+      .boot-status {
+        font-size: 0.66rem; letter-spacing: 0.12em; opacity: 0.5;
+        margin-top: 0.9rem; min-height: 1em;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot, .boot-bar { transition: none; }
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="boot">
+      <div class="boot-inner">
+        <div class="boot-title">SATURN</div>
+        <div class="boot-sub">Real-time system simulation</div>
+        <div class="boot-track"><div class="boot-bar"></div></div>
+        <div class="boot-status">Initializing renderer…</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

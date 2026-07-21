@@ -24,11 +24,18 @@ import { autoTuneDown, quality } from './core/quality.ts';
 
 async function boot(): Promise<void> {
   const container = document.getElementById('app')!;
+  const boot = document.getElementById('boot');
+  const bootBar = boot?.querySelector<HTMLElement>('.boot-bar') ?? null;
+  const bootStatus = boot?.querySelector<HTMLElement>('.boot-status') ?? null;
+
   const engine = await Engine.create(container);
   const { scene, camera } = engine;
 
   const clock = new SimClock();
-  const maps = await loadAllMaps();
+  const maps = await loadAllMaps((d, t) => {
+    if (bootBar) bootBar.style.width = `${Math.round((d / t) * 100)}%`;
+    if (bootStatus) bootStatus.textContent = `Loading Cassini maps… ${d}/${t}`;
+  });
   const system = new SaturnSystem(maps);
   // GPU particle systems: seed once, then integrate every frame.
   for (const p of system.plumeSystems) {
@@ -43,14 +50,16 @@ async function boot(): Promise<void> {
 
   system.update(clock.jd);
 
-  // Camera: cinematic opening framing on the sunlit side, on the same side of
-  // the ring plane as the Sun so the rings show their lit face.
+  // Camera: cinematic opening framing. Offset ~1.15 rad around from the Sun's
+  // azimuth so the terminator sweeps across the disk (a hero shot, not a flat
+  // fully-lit face that blooms into a white blob), and enough elevation to open
+  // the rings — on the Sun's side of the ring plane so their lit face shows.
   {
     const sd = sunDirectionAt(clock.jd, new Vector3());
-    const azimuth = Math.atan2(sd.z, sd.x) + 0.5;
-    const dist = 330;
-    const camY = Math.sign(sd.y || -1) * 80;
-    camera.position.set(Math.cos(azimuth) * dist, camY, Math.sin(azimuth) * dist);
+    const azimuth = Math.atan2(sd.z, sd.x) + 1.15;
+    const horiz = 330;
+    const camY = Math.sign(sd.y || -1) * 155;
+    camera.position.set(Math.cos(azimuth) * horiz, camY, Math.sin(azimuth) * horiz);
   }
   const getPos = (id: string, out: Vector3) => system.getBodyPosition(id, out);
   const getRadius = (id: string) =>
@@ -238,6 +247,21 @@ async function boot(): Promise<void> {
 
   engine.start(frame);
 
+  // Reveal the scene once the first frame is on screen. Prefer a double-rAF
+  // (paints under the overlay first), but a stuck loading screen is the worst
+  // failure mode — so a timer fallback fires the same idempotent reveal even if
+  // rAF is throttled (page loaded in a background tab).
+  if (boot) {
+    if (bootStatus) bootStatus.textContent = 'Ready';
+    const reveal = (): void => {
+      if (boot.classList.contains('done')) return;
+      boot.classList.add('done');
+      setTimeout(() => boot.remove(), 1000);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(reveal));
+    setTimeout(reveal, 1500);
+  }
+
   // Dev/testing hook: drive frames manually (headless tabs never fire rAF).
   // ?qa=1 exposes the same hook in production builds so smoke tests exercise
   // the real bundle (BASE_URL, minification, preload).
@@ -251,6 +275,8 @@ async function boot(): Promise<void> {
 }
 
 boot().catch((err) => {
+  // Replace the loading overlay (don't stack the error under it).
+  document.getElementById('boot')?.remove();
   console.error(err);
   const el = document.createElement('div');
   el.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;color:#dfe6ee;font-family:system-ui;background:#000;padding:24px;text-align:center';
