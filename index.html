@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="apple-touch-icon" href="./favicon.svg" />
+    <!-- F10.5 — selective preload. Kick off the browser's download of the
+         heaviest always-used maps before the module bundle parses, shortening
+         the boot wait. These hrefs must match loadAllMaps() byte-for-byte
+         (base './' → import.meta.env.BASE_URL resolves to './'), so they hit
+         the same cache entry and never double-download. The active quality tier
+         is only known at runtime (localStorage), so we preload the default
+         originals — saturn + starmap are on screen from frame one, and the
+         largest moon mosaic — which are the common case across every tier. -->
+    <link rel="preload" as="image" href="./textures/saturn.jpg" />
+    <link rel="preload" as="image" href="./textures/starmap.jpg" />
+    <link rel="preload" as="image" href="./textures/enceladus.jpg" />
     <meta name="description" content="Real-time, scientifically-grounded simulation of Saturn, its rings and its eight major moons — WebGPU with WebGL2 fallback, in the browser." />
     <meta name="theme-color" content="#000000" />
     <meta property="og:title" content="Saturn — Real-time System Simulation" />
