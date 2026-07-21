@@ -11,6 +11,7 @@ import {
   cameraPosition, clamp, dot, normalize, positionWorld, pow, uv, vec3,
 } from 'three/tsl';
 import { eRingVisUniform, sunDirUniform } from '../materials/sharedUniforms.ts';
+import { planetShadow } from '../materials/planetShadow.ts';
 
 const INNER = 170;
 const OUTER = 330;
@@ -34,7 +35,9 @@ export function createERing(): Mesh {
   // Strong forward-scattering lobe only.
   const fwd = pow(clamp(cosPhase.negate(), 0, 1), 6);
 
-  material.colorNode = vec3(0.55, 0.75, 1.0);
+  // Saturn's shadow: darken where the torus threads the planet's umbra
+  // (additive blend → darkening the color fully extinguishes it).
+  material.colorNode = vec3(0.55, 0.75, 1.0).mul(planetShadow(positionWorld));
   material.opacityNode = density.mul(fwd).mul(0.06).mul(eRingVisUniform);
 
   const geo = new RingGeometry(INNER, OUTER, 128, 4);

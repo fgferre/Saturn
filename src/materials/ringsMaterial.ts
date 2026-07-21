@@ -14,15 +14,14 @@ import {
 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
-  abs, add, atan, cameraPosition, clamp, cos, dot, float, fwidth, length,
+  abs, add, atan, cameraPosition, clamp, cos, dot, float, fwidth,
   max, mix, mul, mx_fractal_noise_float, normalize, oneMinus, positionWorld,
   pow, sin, smoothstep, texture, uv, vec2, vec3,
 } from 'three/tsl';
 import { spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
 import { moonTransitLight } from './moonTransits.ts';
-import { SUN_ANGULAR_RADIUS } from '../physics/eclipse.ts';
+import { planetShadow } from './planetShadow.ts';
 import type { RingProfile } from './ringProfile.ts';
-import { KM_PER_UNIT, SATURN } from '../data/saturn.ts';
 
 function scatterTexture(scatter: Uint8Array): DataTexture {
   // RGB8 -> RGBA8 (WebGPU-friendly), linear data (brightness profiles).
@@ -60,19 +59,9 @@ export function createRingsMaterial(profile: RingProfile, scatter?: Uint8Array |
   const V = normalize(cameraPosition.sub(P));
   const S = sunDirUniform;
 
-  // --- Planet shadow: does the ray P -> Sun hit Saturn's oblate ellipsoid? ---
-  const requ = SATURN.physical.radiusKm / KM_PER_UNIT;
-  const yScale = SATURN.physical.radiusKm / (SATURN.physical.polarRadiusKm ?? SATURN.physical.radiusKm);
-  const q = vec3(P.x, P.y.mul(yScale), P.z);
-  const sScaled = normalize(vec3(S.x, S.y.mul(yScale), S.z));
-  const tStar = dot(q, sScaled).negate();
-  const dMin = length(add(q, sScaled.mul(max(tStar, 0))));
-  // Physical penumbra: half-width grows with distance behind the planet at
-  // the Sun's angular radius (sharp near the globe, soft at the ring edge).
-  const pen = max(tStar, 0).mul(SUN_ANGULAR_RADIUS).add(0.01);
-  const planetShadow = clamp(dMin.sub(requ).div(pen).add(0.5), 0, 1);
-  const shadow = planetShadow.mul(planetShadow.mul(-2).add(3)).mul(planetShadow)
-    .mul(moonTransitLight(P));
+  // --- Planet shadow (Saturn's oblate umbra + penumbra, shared with the F/E
+  // rings) combined with in-shader moon transits. ---
+  const shadow = planetShadow(P).mul(moonTransitLight(P));
 
   // --- Face illumination + scattering ---
   const sunElev = abs(S.y);

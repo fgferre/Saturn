@@ -15,7 +15,7 @@
 import { InstancedBufferGeometry, Mesh, PlaneGeometry } from 'three';
 import { AdditiveBlending } from 'three';
 import { SpriteNodeMaterial } from 'three/webgpu';
-import type { ComputeNode } from 'three/webgpu';
+import type { ComputeNode, UniformNode } from 'three/webgpu';
 import {
   Fn, If, cameraPosition, clamp, cos, dot, exp, float, hash, instanceIndex,
   instancedArray, max, mix, modelWorldMatrixInverse, normalize, pow, sin,
@@ -34,7 +34,10 @@ export interface PlumeSystem {
   dt: { value: number };
 }
 
-export function createEnceladusPlumes(count = 262144): PlumeSystem {
+export function createEnceladusPlumes(
+  count = 262144,
+  eclipseLight?: UniformNode<number>,
+): PlumeSystem {
   const posBuf = instancedArray(count, 'vec3');
   const velBuf = instancedArray(count, 'vec3');
   const lifeBuf = instancedArray(count, 'float');
@@ -128,10 +131,14 @@ export function createEnceladusPlumes(count = 262144): PlumeSystem {
   const fwd = pow(clamp(dot(V, sunLocal).negate(), 0, 1), 3).mul(2.4).add(0.18);
 
   const visible = smoothstep(0.0, 0.15, life); // hidden while life < 0
+  // Saturn's shadow on Enceladus: the geysers dim with the moon as it enters
+  // the umbra (scalar eclipseLight at the moon center — the plume extends
+  // ≤6 radii ≪ the umbra radius, so a per-cloud scalar is a valid approx).
   material.opacityNode = disc
     .mul(visible)
     .mul(exp(alt.negate().div(1.4)))
     .mul(fwd)
+    .mul(eclipseLight ?? float(1))
     .mul(0.055);
   material.colorNode = mix(vec3(0.80, 0.90, 1.0), vec3(0.95, 0.97, 1.0), clamp(alt.div(3), 0, 1));
   material.scaleNode = clamp(alt.mul(0.05).add(0.015), 0.012, 0.16)

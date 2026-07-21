@@ -221,7 +221,7 @@ export class SaturnSystem {
         }));
       }
       if (def.id === 'enceladus') {
-        const plumes = createEnceladusPlumes(quality.plumeCount);
+        const plumes = createEnceladusPlumes(quality.plumeCount, eclipseLight);
         mesh.add(plumes.mesh);
         this.plumeSystems.push(plumes);
       }

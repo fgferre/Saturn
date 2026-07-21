@@ -16,6 +16,7 @@ import {
   oneMinus, positionWorld, pow, sin, uv, vec3,
 } from 'three/tsl';
 import { spokePhaseUniform, sunDirUniform } from './sharedUniforms.ts';
+import { planetShadow } from './planetShadow.ts';
 import { KM_PER_UNIT } from '../data/saturn.ts';
 
 const F_RING_RADIUS_KM = 140180;
@@ -65,9 +66,12 @@ export function createFRing(): Mesh[] {
     const cosPhase = dot(V, sunDirUniform);
     const fwd = pow(clamp(cosPhase.negate().add(0.15), 0, 1.15), 4).mul(2.2).add(0.05);
 
+    // Saturn's shadow: the strand goes dark where it threads the umbra
+    // (additive blend → darkening the color fully extinguishes it).
+    const shadow = planetShadow(positionWorld);
     material.colorNode = vec3(0.9, 0.92, 1.0)
       .mul(across).mul(fwd).mul(strand.brightness)
-      .mul(mix(float(0.4), float(1.6), clump));
+      .mul(mix(float(0.4), float(1.6), clump)).mul(shadow);
     material.opacityNode = across.mul(0.5).mul(clamp(fwd, 0.08, 1.0));
 
     // High angular tessellation so the vertex-stage bend stays smooth.
