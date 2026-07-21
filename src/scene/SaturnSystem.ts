@@ -54,6 +54,12 @@ export interface SystemBody {
    * kept separate for the HUD "Sunlight %" read.
    */
   eclipseTint?: UniformNode<Vector3>;
+  /** Mesh radius in scene units — used by the geometry LOD (screen-size proxy). */
+  lodRadius?: number;
+  /** DTM relief active: pins the fine geometry while the moon is on screen. */
+  lodRelief?: boolean;
+  /** Current LOD sphere index: 2 fine, 1 mid, 0 coarse. */
+  lodTier?: number;
 }
 
 const toUnits = (km: number) => km / KM_PER_UNIT;
@@ -120,8 +126,22 @@ export class SaturnSystem {
   readonly eRingMesh: Mesh;
   private readonly ringshine: Ringshine;
   private readonly orbitLines: Line[] = [];
-  // High tessellation: real displacement needs vertices (limb silhouettes).
-  private readonly moonGeometry = new SphereGeometry(1, ...quality.moonSegments);
+  // Three shared unit spheres, coarse → fine. The fine tier is the preset's
+  // full tessellation (== the old single geometry, so close-ups are unchanged);
+  // real DTM displacement needs those vertices for the limb silhouette. Mid/low
+  // are clamped so they never exceed the preset (Low is only 96×48).
+  private readonly moonGeomHigh = new SphereGeometry(1, ...quality.moonSegments);
+  private readonly moonGeomMid = new SphereGeometry(
+    1, Math.min(128, quality.moonSegments[0]), Math.min(64, quality.moonSegments[1]),
+  );
+  private readonly moonGeomLow = new SphereGeometry(
+    1, Math.min(64, quality.moonSegments[0]), Math.min(32, quality.moonSegments[1]),
+  );
+  /** Moons that swap between the three shared spheres (excludes Hyperion). */
+  private readonly lodBodies: SystemBody[] = [];
+  /** Throttle: LOD is re-evaluated every ~0.5 s (wall-clock), not per frame. */
+  private lodClock = 0;
+  private readonly lodScratch = new Vector3();
 
   constructor(maps?: BodyMaps) {
     this.ringProfile = createRingProfile(maps?.ringProfile);
@@ -200,12 +220,15 @@ export class SaturnSystem {
       // Direct-light mask fed to the material: scalar eclipse × atmosphere tint
       // (reddened penumbral light). Starts at full white (no eclipse).
       const eclipseTint = uniform(new Vector3(1, 1, 1));
+      const relief = maps?.relief.get(def.id);
       const mesh = def.id === 'hyperion'
         ? new Mesh(hyperionGeometry(), createMoonMaterial(def.id, null, eclipseTint))
+        // Start on the fine sphere: first frame (before updateLOD runs) is the
+        // full-detail geometry, so nothing regresses on load.
         : new Mesh(
-            this.moonGeometry,
+            this.moonGeomHigh,
             createMoonMaterial(
-              def.id, maps?.moons.get(def.id), eclipseTint, maps?.relief.get(def.id),
+              def.id, maps?.moons.get(def.id), eclipseTint, relief,
             ),
           );
       mesh.scale.setScalar(radius);
@@ -213,7 +236,15 @@ export class SaturnSystem {
       const anchor = new Object3D();
       anchor.add(mesh);
       this.group.add(anchor);
-      this.bodies.set(def.id, { def, anchor, mesh, eclipseLight, eclipseTint });
+      const body: SystemBody = { def, anchor, mesh, eclipseLight, eclipseTint };
+      // Hyperion keeps its own irregular geometry — never LOD-swapped.
+      if (def.id !== 'hyperion') {
+        body.lodRadius = radius;
+        body.lodRelief = relief != null;
+        body.lodTier = 2; // fine, matching the geometry assigned above
+        this.lodBodies.push(body);
+      }
+      this.bodies.set(def.id, body);
 
       const line = orbitLine(def);
       line.visible = false; // cinematic default; HUD toggle re-enables
@@ -252,6 +283,55 @@ export class SaturnSystem {
     const body = this.bodies.get(id);
     if (!body) return out.set(0, 0, 0);
     return body.anchor.getWorldPosition(out);
+  }
+
+  /**
+   * Swap each moon between the three shared spheres by apparent size, so a
+   * whole-system view isn't paying for 256×128 spheres on sub-pixel moons.
+   * Metric is d/r (camera distance over mesh radius) — scale-free and, for a
+   * fixed vertical FOV, inversely proportional to the moon's pixel height.
+   *
+   * Thresholds carry a ±10% hysteresis band so a moon hovering on a boundary
+   * doesn't swap geometry every evaluation. Throttled to ~2 Hz; call it every
+   * frame from the main loop with the final camera position.
+   *
+   * ARMADILHA: a moon with DTM relief must stay on the fine sphere while its
+   * displaced limb is visible (coarse spheres have too few vertices and the
+   * terrain collapses to a smooth ball), so relief moons use far larger high /
+   * mid boundaries — effectively fine until they shrink toward a few pixels.
+   */
+  updateLOD(cameraPos: Vector3): void {
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (now - this.lodClock < 500) return;
+    this.lodClock = now;
+
+    const H = 0.1; // hysteresis fraction on each boundary
+    for (const body of this.lodBodies) {
+      const radius = body.lodRadius ?? 1;
+      const dist = body.anchor.getWorldPosition(this.lodScratch).distanceTo(cameraPos);
+      const ratio = dist / radius; // small = large on screen
+      // Boundaries between fine|mid and mid|coarse. Relief moons hold fine far
+      // longer so displacement never collapses while it's readable.
+      const b1 = body.lodRelief ? 600 : 90;
+      const b2 = body.lodRelief ? 1600 : 500;
+      const cur = body.lodTier ?? 2;
+      let next = cur;
+      // Apply hysteresis: to gain detail cross the tighter (×(1−H)) edge; to
+      // shed detail cross the looser (×(1+H)) edge.
+      if (cur === 2) {
+        if (ratio > b1 * (1 + H)) next = ratio > b2 * (1 + H) ? 0 : 1;
+      } else if (cur === 1) {
+        if (ratio < b1 * (1 - H)) next = 2;
+        else if (ratio > b2 * (1 + H)) next = 0;
+      } else {
+        if (ratio < b1 * (1 - H)) next = 2;
+        else if (ratio < b2 * (1 - H)) next = 1;
+      }
+      if (next === cur) continue;
+      body.lodTier = next;
+      body.mesh.geometry = next === 2 ? this.moonGeomHigh
+        : next === 1 ? this.moonGeomMid : this.moonGeomLow;
+    }
   }
 
   update(jd: number, sunDir?: Vector3): void {

@@ -435,6 +435,10 @@ async function boot(): Promise<void> {
     controls.update(dt);
     cinema.update(dt);
 
+    // F10.4 — swap moon geometry LOD on the final camera pose (throttled ~2 Hz
+    // internally). Cheap; no RT realloc, so it's safe during engine.capturing.
+    system.updateLOD(camera.position);
+
     // F8.5 — gate the Enceladus plume compute + sprite by camera distance.
     const plumeNear =
       system.getBodyPosition('enceladus', enceladusPos).distanceTo(camera.position)
