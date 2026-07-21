@@ -97,6 +97,24 @@ export class FocusControls {
     this.controls.enableDamping = damping;
   }
 
+  /**
+   * Instantly frame a body at an explicit offset from it (URL / postcard
+   * restore). No fly transition: snaps target+camera and re-derives the
+   * internal spherical state so the first follow-frame doesn't jump.
+   */
+  snap(id: string, offset: Vector3): void {
+    this.focusId = id;
+    this.getBodyPos(id, this.bodyPos);
+    this.controls.target.copy(this.bodyPos);
+    this.camera.position.copy(this.bodyPos).add(offset);
+    this.camera.lookAt(this.bodyPos);
+    this.prevBodyPos.copy(this.bodyPos);
+    this.transition = null;
+    this.controls.enabled = true;
+    this.controls.minDistance = Math.max(this.getBodyRadius(id) * 1.4, 0.02);
+    this.syncOrbitFromPose();
+  }
+
   /** Fly to a body. Re-focusing the current body re-frames it. */
   focus(id: string): void {
     // Drop any pre-focus drag momentum so it cannot freeze across the flight

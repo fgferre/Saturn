@@ -22,6 +22,20 @@ import { Hud, SPEED_VALUES } from './ui/hud.ts';
 import { BodyLabels } from './ui/labels.ts';
 import { Cinema } from './ui/cinema.ts';
 import { autoTuneDown, quality } from './core/quality.ts';
+import {
+  offsetToSpherical, parseState, serializeState, sphericalToOffset,
+  type UrlState,
+} from './core/urlState.ts';
+
+/**
+ * Force an immediate write of the shareable URL, bypassing the 1 Hz throttle.
+ * Wired up during boot; features that mutate then reload/copy (Share, preset
+ * reload) call this so the URL is current before they read `location.href`.
+ */
+let flushUrlImpl: (() => void) | null = null;
+export function flushUrl(): void {
+  flushUrlImpl?.();
+}
 
 async function boot(): Promise<void> {
   const container = document.getElementById('app')!;
@@ -33,6 +47,13 @@ async function boot(): Promise<void> {
   const { scene, camera } = engine;
 
   const clock = new SimClock();
+  // F8.3 — restore shareable state from the URL. Time/speed are applied now so
+  // the first system.update and opening framing use the shared epoch; focus and
+  // camera pose are applied once the controls/HUD exist (below).
+  const initialUrl = parseState(location.search);
+  if (initialUrl.jd !== undefined) clock.jd = initialUrl.jd;
+  if (initialUrl.speed !== undefined) clock.speed = initialUrl.speed;
+
   const maps = await loadAllMaps((d, t) => {
     if (bootBar) bootBar.style.width = `${Math.round((d / t) * 100)}%`;
     if (bootStatus) bootStatus.textContent = `Loading Cassini maps… ${d}/${t}`;
@@ -78,17 +99,64 @@ async function boot(): Promise<void> {
   const allBodies = [SATURN, ...MOONS];
   const byId = new Map(allBodies.map((b) => [b.id, b]));
 
+  // --- F8.3 shareable URL: write current pose with a 1 Hz throttle ----------
+  const urlBodyScratch = new Vector3();
+  const currentUrlState = (): UrlState => {
+    getPos(controls.focusId, urlBodyScratch);
+    const cam = offsetToSpherical(
+      camera.position.x - urlBodyScratch.x,
+      camera.position.y - urlBodyScratch.y,
+      camera.position.z - urlBodyScratch.z,
+    );
+    return { focus: controls.focusId, jd: clock.jd, speed: clock.speed, cam };
+  };
+  const writeUrl = (): void => {
+    // Preserve QA/debug params (?post, ?webgl, ?qa, ?quality, ?notune); only
+    // our own keys are rewritten. Quality stays out of the URL (localStorage).
+    const params = new URLSearchParams(location.search);
+    for (const k of ['focus', 'jd', 'speed', 'cam']) params.delete(k);
+    for (const [k, v] of new URLSearchParams(serializeState(currentUrlState()))) {
+      params.set(k, v);
+    }
+    const qs = params.toString();
+    history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
+  };
+  let urlTimer: ReturnType<typeof setTimeout> | undefined;
+  let urlLastWrite = 0;
+  const scheduleUrlWrite = (): void => {
+    const elapsed = performance.now() - urlLastWrite;
+    if (elapsed >= 1000) {
+      if (urlTimer !== undefined) { clearTimeout(urlTimer); urlTimer = undefined; }
+      urlLastWrite = performance.now();
+      writeUrl();
+    } else if (urlTimer === undefined) {
+      urlTimer = setTimeout(() => {
+        urlTimer = undefined;
+        urlLastWrite = performance.now();
+        writeUrl();
+      }, 1000 - elapsed);
+    }
+  };
+  flushUrlImpl = (): void => {
+    if (urlTimer !== undefined) { clearTimeout(urlTimer); urlTimer = undefined; }
+    urlLastWrite = performance.now();
+    writeUrl();
+  };
+  // Camera pose changes: write when the drag/zoom interaction ends, not per frame.
+  controls.controls.addEventListener('end', scheduleUrlWrite);
+
   const focusBody = (id: string): void => {
     controls.focus(id);
     hud.setFocused(id);
     hud.setInfo(byId.get(id)!);
+    scheduleUrlWrite();
   };
 
   const hud = new Hud(allBodies, engine.backendName, {
     onFocus: focusBody,
-    onSpeed: (v) => { clock.speed = v; },
-    onPause: (p) => { clock.paused = p; },
-    onNow: () => clock.setNow(),
+    onSpeed: (v) => { clock.speed = v; scheduleUrlWrite(); },
+    onPause: (p) => { clock.paused = p; scheduleUrlWrite(); },
+    onNow: () => { clock.setNow(); scheduleUrlWrite(); },
     onToggleOrbits: (v) => system.setOrbitsVisible(v),
     onToggleLabels: (v) => { labels.visible = v; },
     onToggleDrift: (v) => {
@@ -106,6 +174,23 @@ async function boot(): Promise<void> {
   hud.setFocused('saturn');
   hud.setInfo(SATURN);
 
+  // F8.3 — apply the restored focus, camera pose and speed now that the
+  // controls/HUD exist. Unknown ids fall through to the default framing.
+  if (initialUrl.speed !== undefined) hud.setSpeed(clock.speed);
+  if (initialUrl.focus !== undefined && byId.has(initialUrl.focus)) {
+    const id = initialUrl.focus;
+    if (initialUrl.cam) {
+      const [ox, oy, oz] = sphericalToOffset(
+        initialUrl.cam.az, initialUrl.cam.el, initialUrl.cam.dist,
+      );
+      controls.snap(id, urlBodyScratch.set(ox, oy, oz));
+    } else {
+      controls.focus(id);
+    }
+    hud.setFocused(id);
+    hud.setInfo(byId.get(id)!);
+  }
+
   // --- Global keyboard shortcuts (Esc handled inside Cinema) ---
   // Ignore key events aimed at focusable controls so typing/activating them
   // never doubles as a shortcut.
@@ -118,6 +203,7 @@ async function boot(): Promise<void> {
         e.preventDefault();
         clock.paused = !clock.paused;
         hud.setPaused(clock.paused);
+        scheduleUrlWrite();
         break;
       case '[':
       case ']': { // Step through the speed presets, highlighting the HUD.
@@ -127,6 +213,7 @@ async function boot(): Promise<void> {
         i = Math.max(0, Math.min(SPEED_VALUES.length - 1, i + dir));
         clock.speed = SPEED_VALUES[i];
         hud.setSpeed(clock.speed);
+        scheduleUrlWrite();
         break;
       }
       case 'h':
@@ -322,7 +409,7 @@ async function boot(): Promise<void> {
   // the real bundle (BASE_URL, minification, preload).
   if (import.meta.env.DEV || new URLSearchParams(location.search).has('qa')) {
     (window as unknown as Record<string, unknown>).__saturn = {
-      engine, system, clock, controls, focusBody,
+      engine, system, clock, controls, focusBody, flushUrl,
       step: async (dt = 1 / 60) => { frame(dt); await engine.renderOnce(); },
       sunVisibility: () => sunVisibilityUniform.value,
     };
