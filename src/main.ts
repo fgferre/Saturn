@@ -6,10 +6,11 @@ import { SimClock } from './core/SimClock.ts';
 import { SaturnSystem } from './scene/SaturnSystem.ts';
 import { createSky, createStarfield, followCamera } from './scene/Starfield.ts';
 import { Sun } from './scene/Sun.ts';
+import { PaleBlueDot } from './scene/PaleBlueDot.ts';
 import { loadAllMaps } from './materials/textures.ts';
 import { FocusControls } from './camera/FocusControls.ts';
 import {
-  SATURN_MEAN_DISTANCE_AU, saturnSunDistanceAU, sunDirectionAt,
+  earthDirectionAt, SATURN_MEAN_DISTANCE_AU, saturnSunDistanceAU, sunDirectionAt,
 } from './data/sunDirection.ts';
 import {
   eRingVisUniform, edgeOnUniform, slabVisUniform, sunDirUniform,
@@ -268,7 +269,7 @@ async function boot(): Promise<void> {
     onDate: (jd) => { clock.jd = jd; scheduleUrlWrite(); },
     onShare: () => { flushUrl(); return location.href; },
     onToggleOrbits: (v) => system.setOrbitsVisible(v),
-    onToggleLabels: (v) => { labels.visible = v; },
+    onToggleLabels: (v) => { labels.visible = v; paleBlueDot.setLabelVisible(v); },
     onToggleDrift: (v) => {
       controls.controls.autoRotate = v;
       controls.controls.autoRotateSpeed = 0.12;
@@ -284,6 +285,10 @@ async function boot(): Promise<void> {
   // and owns the Esc-to-exit listener.
   const cinema = new Cinema({ controls, focusBody });
   const labels = new BodyLabels(allBodies, focusBody);
+  // F12.1b — the Earth as a real point in Saturn's sky (its own subtle label;
+  // not a focusable body). Sits at the sky, occluded by the globe for free.
+  const paleBlueDot = new PaleBlueDot(document.getElementById('hud')!);
+  scene.add(paleBlueDot.mesh);
   hud.setFocused('saturn');
   hud.setInfo(SATURN);
 
@@ -412,6 +417,7 @@ async function boot(): Promise<void> {
   });
 
   const sunDir = new Vector3();
+  const earthDir = new Vector3();
   const camDist = new Vector3();
   const infoScratch = new Vector3();
   const enceladusPos = new Vector3();
@@ -511,6 +517,10 @@ async function boot(): Promise<void> {
     followCamera(sky, camera.position);
 
     labels.update(camera, getPos, controls.focusId);
+    // F12.1b — Earth point on the final camera pose (after labels.update has
+    // refreshed the camera matrices this frame). Always near the Sun in the sky.
+    earthDirectionAt(clock.jd, earthDir);
+    paleBlueDot.update(earthDir, camera.position, camera);
 
     // DOF tracks the focused body; aperture scaled so distant framings stay
     // sharp and close fly-bys get shallow focus.

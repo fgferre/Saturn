@@ -6,7 +6,7 @@
 
 import { Vector3, Matrix4 } from 'three';
 import { elementsToPosition } from '../orbital/kepler.ts';
-import { SATURN_HELIOCENTRIC, SATURN_POLE } from './saturn.ts';
+import { EARTH_HELIOCENTRIC, SATURN_HELIOCENTRIC, SATURN_POLE } from './saturn.ts';
 
 const DEG = Math.PI / 180;
 const OBLIQUITY = 23.43928 * DEG; // Earth obliquity: ICRF equatorial -> ecliptic
@@ -122,6 +122,24 @@ export function sunDirectionAt(jd: number, out = new Vector3()): Vector3 {
   const p = elementsToPosition(SATURN_HELIOCENTRIC, jd);
   // Saturn position (ecliptic, Y-up scene mapping); Sun is the opposite way.
   out.set(-p.x, -p.y, -p.z).normalize();
+  return out.applyMatrix4(ECL_TO_SATURN);
+}
+
+const _earthDirS = new Vector3();
+const _earthDirE = new Vector3();
+
+/**
+ * Unit vector pointing from Saturn toward the Earth, scene frame (F12.1b, the
+ * "Pale Blue Dot"). Both bodies are propagated in the same ecliptic (Y-up)
+ * frame and the difference is rotated by the very ECL_TO_SATURN that
+ * `sunDirectionAt` uses — so the Earth lands at its true elongation from the
+ * Sun (≤ ~6° as seen from Saturn: it is always near the Sun in Saturn's sky,
+ * which is why the iconic Cassini frame has the Sun eclipsed by the planet).
+ */
+export function earthDirectionAt(jd: number, out = new Vector3()): Vector3 {
+  elementsToPosition(SATURN_HELIOCENTRIC, jd, _earthDirS);
+  elementsToPosition(EARTH_HELIOCENTRIC, jd, _earthDirE);
+  out.copy(_earthDirE).sub(_earthDirS).normalize();
   return out.applyMatrix4(ECL_TO_SATURN);
 }
 
