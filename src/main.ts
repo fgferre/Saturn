@@ -203,6 +203,54 @@ async function boot(): Promise<void> {
     }
   };
 
+  // F8.8 — record a fixed-length WebM of the live canvas via MediaRecorder over
+  // captureStream. Unlike Photo, this NEVER freezes the frame loop (no
+  // engine.capture) — a frozen loop yields a static video — so it uses its own
+  // `recording` guard, entirely separate from Engine's capture path. Pick the
+  // best supported WebM codec once at boot; null means the host can't record,
+  // and the HUD hides the button.
+  const RECORD_MS = 10000;
+  const videoCanvas = engine.renderer.domElement as HTMLCanvasElement;
+  const videoMime = ((): string | null => {
+    if (
+      typeof MediaRecorder === 'undefined' ||
+      typeof videoCanvas.captureStream !== 'function'
+    ) return null;
+    for (const m of ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']) {
+      try { if (MediaRecorder.isTypeSupported(m)) return m; } catch { /* older impls throw */ }
+    }
+    return null;
+  })();
+  let recording = false;
+  const recordVideo = (): Promise<void> => new Promise<void>((resolve, reject) => {
+    if (!videoMime || recording) { resolve(); return; }
+    recording = true;
+    try {
+      const stream = videoCanvas.captureStream(60);
+      const rec = new MediaRecorder(stream, { mimeType: videoMime });
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      rec.onerror = () => { recording = false; reject(new Error('MediaRecorder error')); };
+      rec.onstop = () => {
+        recording = false;
+        const url = URL.createObjectURL(new Blob(chunks, { type: videoMime }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `saturn_${photoStamp(clock.date)}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      rec.start();
+      setTimeout(() => { if (rec.state !== 'inactive') rec.stop(); }, RECORD_MS);
+    } catch (err) {
+      recording = false;
+      reject(err);
+    }
+  });
+
   const hud = new Hud(allBodies, engine.backendName, {
     onFocus: focusBody,
     onSpeed: (v) => { clock.speed = v; scheduleUrlWrite(); },
@@ -220,6 +268,7 @@ async function boot(): Promise<void> {
     onFov: (v) => { applyFov(v); scheduleUrlWrite(); },
     onCinema: () => cinema.enter(),
     onPhoto: savePhoto,
+    onRecord: videoMime ? recordVideo : undefined,
   });
 
   // Cinema mode (HUD fades, slow drift, timed tour) lives in its own module

@@ -24,6 +24,12 @@ export interface HudCallbacks {
   onCinema(): void;
   /** Capture + download a high-res PNG; the button stays disabled until it settles. */
   onPhoto(): void | Promise<void>;
+  /**
+   * Record + download a ~10 s WebM of the canvas; resolves when the file is
+   * saved. Optional — omitted (and the button hidden) when the browser can't
+   * capture the canvas or encode WebM.
+   */
+  onRecord?(): void | Promise<void>;
   /** Apply a user-entered simulation time (Julian Date, already validated). */
   onDate(jd: number): void;
   /** Flush the shareable URL and return `location.href` to copy / share. */
@@ -260,6 +266,7 @@ export class Hud {
       </div>
       <div class="hud-actions">
         <button type="button" class="hud-photo" title="Save a sharp 1920px PNG of the current view">📷 Photo</button>
+        <button type="button" class="hud-record" title="Record a 10-second WebM video of the current view">⏺ Record 10s</button>
         <button type="button" class="hud-share" title="Copy a shareable link to this exact view">🔗 Share</button>
       </div>`;
     hud.appendChild(info);
@@ -307,6 +314,32 @@ export class Hud {
         photoBtn.disabled = false;
       }
     });
+
+    // Record: capture a fixed-length WebM of the live canvas. Photo and Record
+    // are mutually disabled while a recording runs (the photo path freezes the
+    // frame loop, which would stall the video). Drop the button entirely when
+    // the host can't record (onRecord omitted after feature-detection).
+    const recordBtn = info.querySelector<HTMLButtonElement>('.hud-record')!;
+    if (cb.onRecord) {
+      recordBtn.addEventListener('click', async () => {
+        if (recordBtn.disabled) return;
+        recordBtn.disabled = true;
+        photoBtn.disabled = true;
+        const label = recordBtn.textContent;
+        recordBtn.textContent = 'Recording…';
+        try {
+          await cb.onRecord!();
+        } catch (err) {
+          console.error('video recording failed', err);
+        } finally {
+          recordBtn.textContent = label;
+          recordBtn.disabled = false;
+          photoBtn.disabled = false;
+        }
+      });
+    } else {
+      recordBtn.remove();
+    }
 
     // Share: flush the throttled URL, then hand the link to the OS share sheet
     // (mobile) or the clipboard (desktop). Both can reject — a dismissed share
