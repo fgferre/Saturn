@@ -38,8 +38,14 @@ export const daphnisLonUniform = uniform(0);
  */
 export const prometheusLonUniform = uniform(0);
 
-/** Cloud-advection phase for Saturn's zonal jets (sim-time driven, wraps). */
+/** Fine component of Saturn's cloud phase; see cloudPhaseCoarseUniform. */
 export const cloudPhaseUniform = uniform(0);
+
+/**
+ * Coarse radix-64 component of Saturn's continuous cloud phase. Keeping the
+ * components separate avoids both epoch-reset pops and large-f32 UV jitter.
+ */
+export const cloudPhaseCoarseUniform = uniform(0);
 
 /** 0..1 — how much of the solar disk the camera can see (drives lens flare). */
 export const sunVisibilityUniform = uniform(1);

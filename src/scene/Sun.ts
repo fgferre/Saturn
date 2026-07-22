@@ -131,8 +131,7 @@ export class Sun {
         .mul(SUN_DISPLAY_RADIANCE)
         .mul(solarIrradianceUniform)
         .mul(solarTintUniform)
-        .mul(sunVisibilityUniform)
-        .mul(diskMask);
+        .mul(sunVisibilityUniform);
       material.opacityNode = diskMask;
 
       this.disk = new Mesh(new PlaneGeometry(1, 1), material);
@@ -164,9 +163,11 @@ export class Sun {
       const skirt = max(float(0), lorentz.sub(edgeVal)).div(float(1).sub(edgeVal));
       const warm = vec3(1.0, 0.94, 0.82);
       const energy = core2.mul(SUN_SEED_CORE_RADIANCE).add(skirt.mul(SUN_SEED_SKIRT_RADIANCE));
-      // Pure energy — Engine multiplies tint × visibility once for glow/flare.
-      material.colorNode = warm.mul(energy);
-      material.opacityNode = clamp(core2.add(skirt.mul(0.85)), 0, 1);
+      // Encode the radiance profile once through additive alpha. Engine still
+      // multiplies tint × visibility exactly once for glow/flare.
+      const peakEnergy = SUN_SEED_CORE_RADIANCE + SUN_SEED_SKIRT_RADIANCE;
+      material.colorNode = warm.mul(peakEnergy);
+      material.opacityNode = clamp(energy.div(peakEnergy), 0, 1);
 
       this.seed = new Mesh(new PlaneGeometry(1, 1), material);
       this.seed.scale.setScalar(SUN_SEED_SCALE);

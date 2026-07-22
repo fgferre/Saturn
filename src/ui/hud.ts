@@ -310,6 +310,7 @@ export class Hud {
     // Info panel.
     const info = document.createElement('div');
     info.className = 'panel hud-info';
+    info.id = 'hud-info-panel';
     info.innerHTML = `<h2></h2><div class="blurb"></div><div class="stats"></div>
       <div class="hud-toggles">
         <label><input type="checkbox" data-t="orbits" aria-label="Show orbit paths">Orbits</label>
@@ -343,8 +344,27 @@ export class Hud {
     const grip = document.createElement('button');
     grip.type = 'button';
     grip.className = 'hud-sheet-grip';
-    grip.setAttribute('aria-label', 'Expand or collapse the info panel');
-    grip.addEventListener('click', () => info.classList.toggle('sheet-open'));
+    grip.setAttribute('aria-controls', info.id);
+    const setSheetOpen = (open: boolean): void => {
+      info.classList.toggle('sheet-open', open);
+      hud.classList.toggle('mobile-sheet-open', open);
+      // Invisible instruments must also leave the keyboard/a11y tree while the
+      // inspector owns the mobile viewport.
+      bar.inert = open;
+      list.inert = open;
+      hud.querySelectorAll<HTMLElement>('.body-label').forEach((el) => { el.inert = open; });
+      grip.setAttribute('aria-expanded', String(open));
+      grip.setAttribute('aria-label', `${open ? 'Collapse' : 'Expand'} the info panel`);
+    };
+    setSheetOpen(false);
+    grip.addEventListener('click', () => setSheetOpen(!info.classList.contains('sheet-open')));
+    grip.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && info.classList.contains('sheet-open')) {
+        e.preventDefault();
+        setSheetOpen(false);
+        grip.focus();
+      }
+    });
     info.insertBefore(grip, info.firstChild);
 
     this.infoName = info.querySelector('h2')!;

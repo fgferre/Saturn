@@ -87,9 +87,12 @@ export function createFRing(): Mesh[] {
     // (additive blend → darkening the color fully extinguishes it).
     const shadow = planetShadow(positionWorld);
     material.colorNode = vec3(0.9, 0.92, 1.0)
-      .mul(across).mul(fwd).mul(strand.brightness)
-      .mul(mix(float(0.4), float(1.6), clump)).mul(shadow).mul(channelMask);
-    material.opacityNode = across.mul(0.5).mul(clamp(fwd, 0.08, 1.0)).mul(channelMask);
+      .mul(fwd).mul(strand.brightness)
+      .mul(mix(float(0.4), float(1.6), clump)).mul(shadow);
+    // Additive blending applies alpha to RGB. Keep the transverse/channel mask
+    // here only, so neither profile is squared; fwd stays in RGB because its HDR
+    // peak intentionally exceeds the [0, 1] blend-factor range.
+    material.opacityNode = across.mul(0.5).mul(channelMask);
 
     // High angular tessellation so the vertex-stage bend stays smooth.
     const geo = new PlaneGeometry(1, 1, 1024, 1);

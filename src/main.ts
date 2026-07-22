@@ -284,7 +284,7 @@ async function boot(): Promise<void> {
   // Cinema mode (HUD fades, slow drift, timed tour) lives in its own module
   // and owns the Esc-to-exit listener.
   const cinema = new Cinema({ controls, focusBody });
-  const labels = new BodyLabels(allBodies, focusBody);
+  const labels = new BodyLabels(allBodies, focusBody, engine.renderer.domElement);
   // F12.1b — the Earth as a real point in Saturn's sky (its own subtle label;
   // not a focusable body). Sits at the sky, occluded by the globe for free.
   const paleBlueDot = new PaleBlueDot(document.getElementById('hud')!);

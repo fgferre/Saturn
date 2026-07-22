@@ -1,5 +1,6 @@
 /**
- * Onda 9 / F12.1b self-check — the "Pale Blue Dot". Run via `npm run check`.
+ * Onda 9 / F12 self-check — product polish + visual contracts. Run via
+ * `npm run check`.
  *
  * Contract this file pins:
  *  - earthDirectionAt returns a unit vector, finite for every sampled date.
@@ -20,7 +21,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Vector3 } from 'three';
 import { earthDirectionAt, sunDirectionAt } from './data/sunDirection.ts';
-import { dateToJD } from './orbital/types.ts';
+import { dateToJD, J2000 } from './orbital/types.ts';
+import {
+  CLOUD_LAP_DAYS, CLOUD_PHASE_RADIX, splitCloudPhase,
+} from './physics/cloudAdvection.ts';
+import { labelBoxesOverlap, projectNdcToViewport } from './ui/labels.ts';
 
 const assert = {
   ok(cond: unknown, msg: string): void {
@@ -79,5 +84,74 @@ const base = dirname(fileURLToPath(import.meta.url));
   assert.ok(/earthDirectionAt\(clock\.jd/.test(mainSrc), 'main.ts drives it from the live clock');
 }
 
+// --- visual-bug regression contracts ----------------------------------------
+{
+  // Cloud phase must cross the old 97.5-day reset continuously while each f32
+  // component remains compact across the full supported date-picker range.
+  const reconstruct = (jd: number): number => {
+    const p = splitCloudPhase(jd);
+    assert.ok(p.fine >= 0 && p.fine < CLOUD_PHASE_RADIX, 'cloud fine phase stays in radix range');
+    return p.coarse * CLOUD_PHASE_RADIX + p.fine;
+  };
+  const oldReset = J2000 + 97.5;
+  const before = reconstruct(oldReset - 1e-5);
+  const after = reconstruct(oldReset + 1e-5);
+  assert.near(after - before, 2e-5 / CLOUD_LAP_DAYS, 1e-10, 'cloud phase is continuous at old reset');
+  for (const jd of [J2000 - 200 * 365.25, J2000, J2000 + 200 * 365.25]) reconstruct(jd);
+
+  const systemSrc = readFileSync(join(base, 'scene', 'SaturnSystem.ts'), 'utf8');
+  assert.ok(!systemSrc.includes('jd % 97.5'), 'old discontinuous cloud modulo stays removed');
+
+  const atmoSrc = readFileSync(join(base, 'materials', 'raymarchAtmosphere.ts'), 'utf8');
+  assert.ok(
+    atmoSrc.includes('material.blendSrc = OneFactor')
+      && atmoSrc.includes('material.blendDst = OneMinusSrcAlphaFactor'),
+    'atmosphere adds integrated inscatter once while alpha attenuates destination',
+  );
+  assert.ok(atmoSrc.includes('colorOut.mul(edgeFade)'), 'atmosphere shell edge fades RGB exactly once');
+
+  const sunSrc = readFileSync(join(base, 'scene', 'Sun.ts'), 'utf8');
+  const diskBlock = sunSrc.slice(sunSrc.indexOf('// --- Display disk'), sunSrc.indexOf('// --- Glare seed'));
+  assert.ok(!diskBlock.includes('.mul(diskMask)'), 'display disk mask must not be baked into additive RGB');
+  assert.ok(diskBlock.includes('material.opacityNode = diskMask'), 'display disk mask belongs to opacity only');
+  assert.ok(
+    sunSrc.includes('material.opacityNode = clamp(energy.div(peakEnergy), 0, 1)'),
+    'solar seed encodes its radiance profile once through additive alpha',
+  );
+
+  const fRingSrc = readFileSync(join(base, 'materials', 'fRing.ts'), 'utf8');
+  const fRingRgb = fRingSrc.slice(fRingSrc.indexOf('material.colorNode ='), fRingSrc.indexOf('material.opacityNode ='));
+  assert.ok(!fRingRgb.includes('.mul(across)') && !fRingRgb.includes('.mul(channelMask)'),
+    'F-ring transverse and channel masks must not be baked into additive RGB');
+  assert.ok(/opacityNode\s*=\s*across[\s\S]*channelMask/.test(fRingSrc),
+    'F-ring opacity owns transverse and channel masks');
+
+  const point = projectNdcToViewport(0, 0, { left: 23, top: 41, width: 844, height: 390 });
+  assert.near(point.x, 445, 1e-9, 'label projection includes renderer left offset');
+  assert.near(point.y, 236, 1e-9, 'label projection includes renderer top offset');
+  assert.ok(labelBoxesOverlap(
+    { left: 10, top: 10, right: 40, bottom: 28 },
+    { left: 42, top: 12, right: 72, bottom: 30 },
+  ), 'label collision padding removes near-touching text');
+  assert.ok(!labelBoxesOverlap(
+    { left: 10, top: 10, right: 40, bottom: 28 },
+    { left: 44, top: 12, right: 72, bottom: 30 },
+  ), 'label collision keeps boxes beyond the padding budget');
+
+  const hudCss = readFileSync(join(base, 'ui', 'hud.css'), 'utf8');
+  const hudTs = readFileSync(join(base, 'ui', 'hud.ts'), 'utf8');
+  assert.ok(hudCss.includes('@media (max-width: 720px), (max-height: 500px)'),
+    'mobile HUD handles both narrow and low-height viewports');
+  assert.ok(hudCss.includes('#hud.mobile-sheet-open .hud-time'),
+    'open mobile sheet removes timeline collision');
+  assert.ok(hudTs.includes("grip.setAttribute('aria-expanded', String(open))"),
+    'bottom-sheet grip exposes its state accessibly');
+  assert.ok(hudTs.includes('bar.inert = open') && hudTs.includes('list.inert = open'),
+    'hidden mobile instruments leave the keyboard tree while the sheet is open');
+  assert.ok(hudCss.includes('flex-wrap: nowrap') && hudCss.includes('touch-action: pan-x'),
+    'mobile instrument rails stay single-line and touch-scrollable');
+}
+
 console.log('wave9 selfcheck: all assertions passed');
 console.log(`  Earth elongation from the Sun over 2 Saturn years: ${minElong.toFixed(2)}° … ${maxElong.toFixed(2)}°`);
+console.log('  visual contracts: cloud continuity, single alpha, viewport labels, mobile HUD');

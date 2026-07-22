@@ -27,11 +27,12 @@ import { createRaymarchedAtmosphere } from '../materials/raymarchAtmosphere.ts';
 import { createEnceladusPlumes, type PlumeSystem } from '../effects/plumes.ts';
 import { createERing } from '../effects/eRing.ts';
 import {
-  cloudPhaseUniform, daphnisLonUniform, edgeOnUniform, moonShadowUniforms,
+  cloudPhaseCoarseUniform, cloudPhaseUniform, daphnisLonUniform, edgeOnUniform, moonShadowUniforms,
   plumeActivityUniform, prometheusLonUniform, seasonalTiltUniform, spokePhaseUniform,
 } from '../materials/sharedUniforms.ts';
 import { seasonalTilt } from '../data/season.ts';
 import { createFRing } from '../materials/fRing.ts';
+import { splitCloudPhase } from '../physics/cloudAdvection.ts';
 import { createRingSlab } from '../effects/ringSlab.ts';
 import { saturnShadowOnMoon, solarAtmosphereTint } from '../physics/eclipse.ts';
 import { Ringshine } from '../physics/ringshine.ts';
@@ -443,9 +444,12 @@ export class SaturnSystem {
     // B-ring spokes corotate with the magnetosphere (~System III rate).
     spokePhaseUniform.value = -(((jd * 24) / 10.66) * Math.PI * 2) % (Math.PI * 2);
 
-    // Cloud advection: equatorial jet laps the planet in ~9.75 days.
-    // Wrapped every 10 laps to keep f32 precision (rare, brief reset).
-    cloudPhaseUniform.value = (jd % 97.5) / 9.75;
+    // Cloud advection: equatorial jet laps the planet in ~9.75 days. A radix
+    // split keeps the phase continuous across time-scrubs without feeding large
+    // UV values to f32 shaders (see periodicCloudProduct in saturnMaterial).
+    const cloudPhase = splitCloudPhase(jd);
+    cloudPhaseCoarseUniform.value = cloudPhase.coarse;
+    cloudPhaseUniform.value = cloudPhase.fine;
 
     // Seasonal hemispheric hue: pure lagged forcing (no in-loop filter, so it
     // stays correct under time-scrub / reverse). +value blues the north.

@@ -18,14 +18,29 @@ import {
 } from 'three/tsl';
 import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
-import { cloudPhaseUniform, seasonalTiltUniform, sunDirUniform } from './sharedUniforms.ts';
+import {
+  cloudPhaseCoarseUniform, cloudPhaseUniform, seasonalTiltUniform, sunDirUniform,
+} from './sharedUniforms.ts';
 import { moonTransitLight } from './moonTransits.ts';
 import type { RingProfile } from './ringProfile.ts';
 import { KM_PER_UNIT } from '../data/saturn.ts';
 import { SUN_ANGULAR_RADIUS } from '../physics/eclipse.ts';
 import { DirectMaskedStandardMaterial } from './directMaskedLighting.ts';
+import { CLOUD_PHASE_RADIX } from '../physics/cloudAdvection.ts';
 
 type NodeObj = ShaderNodeObject<Node>;
+
+/**
+ * Return fract(totalCloudPhase * multiplier) without ever materializing the
+ * large total phase in f32. Integer multiples removed by the inner fract do not
+ * change the periodic result, including when multiplier varies by latitude.
+ */
+function periodicCloudProduct(multiplier: NodeObj): NodeObj {
+  const coarseProduct = cloudPhaseCoarseUniform.mul(
+    fract(multiplier.mul(CLOUD_PHASE_RADIX)),
+  );
+  return fract(coarseProduct.add(cloudPhaseUniform.mul(multiplier))) as NodeObj;
+}
 
 /** Procedural banding — the fallback when no real map is available. */
 function proceduralBands(bandUv: NodeObj): NodeObj {
@@ -71,11 +86,11 @@ function animatedSurface(map: Texture): NodeObj {
   const jets = cos(lat.mul(2.0)).pow(8).mul(1.0) // equatorial super-jet
     .add(cos(lat.mul(9.0)).mul(0.12))
     .add(0.05);
-  const drift = cloudPhaseUniform.mul(jets);
+  const drift = periodicCloudProduct(jets as NodeObj);
 
   // Dual-phase flow wiggle: two offset samples of a curl-ish noise field,
   // triangle-blended so distortion resets before it smears.
-  const phase = fract(cloudPhaseUniform.mul(0.13));
+  const phase = periodicCloudProduct(float(0.13) as NodeObj);
   const w0 = abs(phase.mul(2).sub(1)); // 1..0..1 triangle
   const wiggleA = mx_noise_float(vec3(baseUv.x.mul(10), v.mul(24), phase.mul(4)), 1.0).mul(0.004);
   const wiggleB = mx_noise_float(vec3(baseUv.x.mul(10), v.mul(24), phase.mul(4).add(2)), 1.0).mul(0.004);
@@ -126,7 +141,11 @@ function polarHexagon(color: NodeObj): NodeObj {
   const lat = p.y; // sin(latitude) after normalize
   const lon = atan(p.z, p.x);
   // Hexagonal radius modulation of the collar boundary (~78°N: sinLat≈0.978).
-  const hexEdge = float(0.9724).add(cos(lon.mul(6).add(cloudPhaseUniform.mul(0.35))).mul(0.0035));
+  // periodicCloudProduct works in turns; convert the 0.35 rad/lap rotation to
+  // turns/lap and then back to a compact angle for cos().
+  const hexPhase = periodicCloudProduct(float(0.35 / (Math.PI * 2)) as NodeObj)
+    .mul(Math.PI * 2);
+  const hexEdge = float(0.9724).add(cos(lon.mul(6).add(hexPhase)).mul(0.0035));
   const inHex = smoothstep(hexEdge.sub(0.0015), hexEdge.add(0.0015), lat);
   // Inside the hexagon: darker blue-gray polar vortex with a bright rim.
   const rim = smoothstep(hexEdge.sub(0.004), hexEdge, lat)

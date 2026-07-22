@@ -12,7 +12,9 @@
  * profile (phase 4).
  */
 
-import { BackSide, Mesh, SphereGeometry } from 'three';
+import {
+  BackSide, CustomBlending, Mesh, OneFactor, OneMinusSrcAlphaFactor, SphereGeometry,
+} from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   Fn, Loop, cameraPosition, clamp, dot, exp, float, max,
@@ -47,6 +49,12 @@ export function createRaymarchedAtmosphere(p: AtmosphereParams): Mesh {
   material.transparent = true;
   material.depthWrite = false;
   material.side = BackSide;
+  // Physically useful atmosphere compositing is premultiplied in spirit:
+  // integrated inscatter is added once while alpha attenuates the background.
+  // Custom factors avoid NormalBlending multiplying colorOut by alpha again.
+  material.blending = CustomBlending;
+  material.blendSrc = OneFactor;
+  material.blendDst = OneMinusSrcAlphaFactor;
 
   const STEPS = p.steps ?? 16;
   const Rp = p.bodyRadius;
@@ -114,7 +122,10 @@ export function createRaymarchedAtmosphere(p: AtmosphereParams): Mesh {
     const alpha = clamp(vec3(1).sub(transmittance).dot(vec3(0.34, 0.33, 0.33)).mul(1.2), 0.0, 1.0);
     // Fade the hard shell edge (grazing rays with near-zero path).
     const edgeFade = smoothstep(0.0, Ra * 0.004, tEnd.sub(t0));
-    return vec4(colorOut, max(alpha, colorOut.dot(vec3(1)).mul(0.25)).mul(edgeFade));
+    return vec4(
+      colorOut.mul(edgeFade),
+      max(alpha, colorOut.dot(vec3(1)).mul(0.25)).mul(edgeFade),
+    );
   })();
 
   material.colorNode = output.rgb;
