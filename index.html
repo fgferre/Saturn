@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./favicon.svg" />
+    <!-- F10.5 — selective preload. Kick off the browser's download of the
+         heaviest always-used maps before the module bundle parses, shortening
+         the boot wait. These hrefs must match loadAllMaps() byte-for-byte
+         (base './' → import.meta.env.BASE_URL resolves to './'), so they hit
+         the same cache entry and never double-download. The active quality tier
+         is only known at runtime (localStorage), so we preload the default
+         originals — saturn + starmap are on screen from frame one, and the
+         largest moon mosaic — which are the common case across every tier. -->
+    <link rel="preload" as="image" href="./textures/saturn.jpg" />
+    <link rel="preload" as="image" href="./textures/starmap.jpg" />
+    <link rel="preload" as="image" href="./textures/enceladus.jpg" />
+    <meta name="description" content="Real-time, scientifically-grounded simulation of Saturn, its rings and its eight major moons — WebGPU with WebGL2 fallback, in the browser." />
+    <meta name="theme-color" content="#000000" />
+    <meta property="og:title" content="Saturn — Real-time System Simulation" />
+    <meta property="og:description" content="Real-time, scientifically-grounded simulation of Saturn, its rings and its eight major moons — WebGPU with WebGL2 fallback, in the browser." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://fgferre.github.io/Saturn/brand/hero.jpg" />
+    <title>Saturn — Real-time System Simulation</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+      #app { position: fixed; inset: 0; }
+      /* touch-action: none — keep browser scroll/pinch-zoom from stealing the
+         drag/pinch gestures OrbitControls needs (F12.2). */
+      #app canvas { display: block; touch-action: none; }
+
+      /* Boot overlay — inlined so it paints on first frame, before the module
+         bundle parses. JS updates the bar and fades it out when maps finish. */
+      #boot {
+        position: fixed; inset: 0; z-index: 10;
+        display: grid; place-items: center;
+        background: #05070c; overflow: hidden;
+        opacity: 1; transition: opacity 0.9s ease;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: #dfe6ee;
+      }
+      #boot::before {
+        content: ''; position: absolute; inset: -48px;
+        background: url(./brand/hero.jpg) center/cover no-repeat;
+        filter: blur(30px) brightness(0.32) saturate(1.15);
+      }
+      #boot.done { opacity: 0; pointer-events: none; }
+      .boot-inner { position: relative; text-align: center; width: min(340px, 76vw); }
+      .boot-title {
+        font-size: 2.6rem; font-weight: 200; letter-spacing: 0.42em;
+        margin-left: 0.42em; /* optical centering for tracked caps */
+      }
+      .boot-sub {
+        font-size: 0.7rem; letter-spacing: 0.28em; text-transform: uppercase;
+        opacity: 0.55; margin-top: 0.5rem;
+      }
+      .boot-track {
+        margin-top: 1.8rem; height: 2px; border-radius: 2px;
+        background: rgba(255, 255, 255, 0.12); overflow: hidden;
+      }
+      .boot-bar {
+        height: 100%; width: 0%; border-radius: 2px;
+        background: linear-gradient(90deg, #b98a4e, #e9d6ad);
+        transition: width 0.25s ease;
+      }
+      .boot-status {
+        font-size: 0.66rem; letter-spacing: 0.12em; opacity: 0.5;
+        margin-top: 0.9rem; min-height: 1em;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot, .boot-bar { transition: none; }
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-wHex0mzb.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-JftdQWiA.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="boot">
+      <div class="boot-inner">
+        <div class="boot-title">SATURN</div>
+        <div class="boot-sub">Real-time system simulation</div>
+        <div class="boot-track"><div class="boot-bar"></div></div>
+        <div class="boot-status">Initializing renderer…</div>
+      </div>
+    </div>
+  </body>
+</html>
