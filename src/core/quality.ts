@@ -30,8 +30,13 @@ export const PRESETS: Record<QualityName, QualityPreset> = {
     plumeCount: 16384, slabCount: 8192, moonSegments: [96, 48],
     dof: false, lensflare: false, filmGrain: 0,
   },
+  // msaaSamples must be WebGPU-legal (0 or 4 — there is no 2× MSAA there; see
+  // Engine). Med is both the touch-mobile default and the auto-tuner's landing
+  // spot for slow machines, so the illegal 2 rounds DOWN to 0: promoting it to
+  // 4 would make the "lighter" preset carry High's most expensive raster knob
+  // on exactly the GPUs that can't afford it.
   med: {
-    name: 'med', label: 'Med', dprCap: 1.5, msaaSamples: 2, raymarchSteps: 12,
+    name: 'med', label: 'Med', dprCap: 1.5, msaaSamples: 0, raymarchSteps: 12,
     plumeCount: 65536, slabCount: 24576, moonSegments: [128, 64],
     dof: false, lensflare: true, filmGrain: 0.03,
   },
@@ -46,6 +51,54 @@ export const PRESETS: Record<QualityName, QualityPreset> = {
     dof: true, lensflare: true, filmGrain: 0.04,
   },
 };
+
+export type BackendName = 'WebGPU' | 'WebGL2';
+
+/** F10.3 quantized resolution ladder; every applied DPR must be one of these. */
+export const DYNAMIC_DPR_STEPS = [0.75, 1, 1.25, 1.5, 2] as const;
+
+export function dprStepsFor(cap: number): number[] {
+  const steps = DYNAMIC_DPR_STEPS.filter((step) => step <= cap + 1e-6);
+  // Every shipped cap is >= 1, but keep malformed future presets recoverable.
+  return steps.length > 0 ? steps : [DYNAMIC_DPR_STEPS[0]];
+}
+
+/**
+ * Quantize the boot DPR before PassNode targets are allocated. Previously the
+ * renderer kept the raw devicePixelRatio while the HUD/controller tracked the
+ * nearest step, so e.g. a 1.1× renderer was reported and controlled as 1.0×.
+ */
+export function quantizeDpr(deviceDpr: number, cap: number): number {
+  const steps = dprStepsFor(cap);
+  const target = Number.isFinite(deviceDpr) && deviceDpr > 0 ? deviceDpr : 1;
+  let best = steps[0];
+  let bestDistance = Math.abs(best - target);
+  for (let i = 1; i < steps.length; i++) {
+    const distance = Math.abs(steps[i] - target);
+    if (distance < bestDistance) {
+      best = steps[i];
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/** Resolve a scene-pass sample count that the selected backend can express. */
+export function resolveMsaaSamples(requested: number, backend: BackendName): number {
+  const samples = Number.isFinite(requested) ? Math.max(0, Math.floor(requested)) : 0;
+  if (backend === 'WebGPU') return samples > 1 ? 4 : 0;
+  return samples;
+}
+
+/** Parse the ephemeral QA/debug quality pin without accepting prototype keys. */
+export function qualityPinFromSearch(search: string): QualityName | null {
+  try {
+    const value = new URLSearchParams(search).get('quality');
+    return value && Object.hasOwn(PRESETS, value) ? value as QualityName : null;
+  } catch {
+    return null;
+  }
+}
 
 const STORAGE_KEY = 'saturn.quality';
 const TUNED_KEY = 'saturn.autotuned';
@@ -79,8 +132,8 @@ function load(): QualityPreset {
   try {
     // QA: ?quality=<preset> pins a preset for this page load only — never
     // persisted, so headless runs don't disturb the stored user choice.
-    const pinned = new URLSearchParams(location.search).get('quality') as QualityName | null;
-    if (pinned && PRESETS[pinned]) return PRESETS[pinned];
+    const pinned = qualityPinFromSearch(location.search);
+    if (pinned) return PRESETS[pinned];
     const name = localStorage.getItem(STORAGE_KEY) as QualityName | null;
     if (name && PRESETS[name]) return PRESETS[name];
     // No pin and no saved choice: on touch phones start on a light preset
@@ -105,7 +158,13 @@ export function setQuality(name: QualityName): void {
     return;
   }
   beforeReload?.(); // flush URL state so the reload lands on the same view
-  location.reload();
+  // An explicit pick outranks the `?quality` pin — load() reads the pin first,
+  // and writeUrl carries it across every reload, so leaving it in place makes
+  // the HUD buttons look dead (they store the choice, the pin then ignores it).
+  // location.replace = reload with the pin dropped, no extra history entry.
+  const url = new URL(location.href);
+  url.searchParams.delete('quality');
+  location.replace(url.href);
 }
 
 /**
@@ -130,7 +189,12 @@ export const tuneDisabled = (() => {
  */
 export function autoTuneDown(measuredFps: number): void {
   try {
-    if (tuneDisabled || localStorage.getItem(TUNED_KEY)) return;
+    // A quality pin is ephemeral and must not mutate the saved choice behind
+    // the user's back. Dynamic DPR may still adapt unless ?notune is present.
+    if (
+      tuneDisabled || qualityPinFromSearch(location.search) ||
+      localStorage.getItem(TUNED_KEY)
+    ) return;
     localStorage.setItem(TUNED_KEY, '1');
     const order: QualityName[] = ['low', 'med', 'high', 'ultra'];
     const idx = order.indexOf(quality.name);

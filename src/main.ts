@@ -26,7 +26,9 @@ import { dateToJD } from './orbital/types.ts';
 import { Hud, SPEED_VALUES } from './ui/hud.ts';
 import { BodyLabels, occludedBySaturn } from './ui/labels.ts';
 import { Cinema } from './ui/cinema.ts';
-import { autoTuneDown, quality, setBeforeReload, tuneDisabled } from './core/quality.ts';
+import {
+  autoTuneDown, dprStepsFor, quality, setBeforeReload, tuneDisabled,
+} from './core/quality.ts';
 import {
   FOV_DEFAULT, FOV_MAX, FOV_MIN,
   offsetToSpherical, parseState, serializeState, sphericalToOffset,
@@ -189,11 +191,19 @@ async function boot(): Promise<void> {
   //   • DOF-clean: the full-post DOF blurs the whole frame whenever the aperture
   //     is nonzero (close fly-bys), so force it to 0 for the shot and restore.
   const PHOTO_WIDTH = 1920;
+  // …and a ceiling on that bump: a phone viewport (~400 CSS px) asks for DPR
+  // ~4.8, which allocates a 1920×3840 target *per post pass* — enough to blow
+  // mobile VRAM. Cap the buffer height instead; a slightly soft upscale beats a
+  // lost context. Never below prevDpr (that buffer is already allocated).
+  const PHOTO_MAX_HEIGHT = 2160;
   const savePhoto = async (): Promise<void> => {
     const cssWidth = container.clientWidth || 1280;
+    const cssHeight = container.clientHeight || 720;
     const prevDpr = engine.renderer.getPixelRatio();
     const prevAperture = engine.dofAperture.value;
-    const photoDpr = Math.max(prevDpr, PHOTO_WIDTH / cssWidth);
+    const photoDpr = Math.max(
+      prevDpr, Math.min(PHOTO_WIDTH / cssWidth, PHOTO_MAX_HEIGHT / cssHeight),
+    );
     try {
       engine.dofAperture.value = 0;
       if (photoDpr !== prevDpr) engine.renderer.setPixelRatio(photoDpr);
@@ -526,7 +536,7 @@ async function boot(): Promise<void> {
   // 1 s windows on the same side of the band; the controller is PAUSED while the
   // tab is hidden or a capture holds the loop (never react to frozen/off-screen
   // frames). ?notune disables it. The effective DPR shows in the HUD.
-  const DPR_STEPS = [0.75, 1.0, 1.25, 1.5, 2.0].filter((s) => s <= quality.dprCap + 1e-6);
+  const DPR_STEPS = dprStepsFor(quality.dprCap);
   let dprIndex = 0;
   { // start from the nearest quantized step to the engine's current DPR
     const cur = engine.renderer.getPixelRatio();
@@ -745,7 +755,7 @@ async function boot(): Promise<void> {
   // the real bundle (BASE_URL, minification, preload).
   if (import.meta.env.DEV || new URLSearchParams(location.search).has('qa')) {
     (window as unknown as Record<string, unknown>).__saturn = {
-      engine, system, clock, controls, focusBody, flushUrl,
+      engine, system, clock, controls, focusBody, flushUrl, autoTuneDown,
       step: async (dt = 1 / 60) => { frame(dt); await engine.renderOnce(); },
       sunVisibility: () => sunVisibilityUniform.value,
     };

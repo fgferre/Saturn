@@ -31,7 +31,7 @@ import { chromaticAberration } from 'three/addons/tsl/display/ChromaticAberratio
 import { sunVisibilityUniform } from '../materials/sharedUniforms.ts';
 import { DISPLAY_SUN_LAYER, SOLAR_LAYER, solarTintUniform } from '../scene/Sun.ts';
 import { radialBloom } from '../effects/radialBloom.ts';
-import { quality } from './quality.ts';
+import { quality, quantizeDpr, resolveMsaaSamples } from './quality.ts';
 
 /** Post A/B modes for QA (`?post=`). `anamorphic` kept as alias of full solar glow. */
 export type PostMode = 'raw' | 'bloom' | 'anamorphic' | 'flare' | 'full';
@@ -100,15 +100,26 @@ export class Engine {
     this.solarCamera = new PerspectiveCamera(45, width / height, 0.05, 120000);
     this.solarCamera.layers.set(SOLAR_LAYER);
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.dprCap));
+    renderer.setPixelRatio(quantizeDpr(window.devicePixelRatio, quality.dprCap));
     renderer.setSize(width, height);
     // AgX: gentler highlight rolloff than ACES — closest to Cassini's
     // natural-color look (calibrated against PIA21345).
     renderer.toneMapping = AgXToneMapping;
     renderer.toneMappingExposure = 1.4;
 
+    this.backendName = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
+      ? 'WebGPU'
+      : 'WebGL2';
+
+    // WebGPU allows a sample count of 1 or 4 — nothing else. three promotes the
+    // *pipeline* to 4 (WebGPUUtils.getSampleCount) but builds the attachment
+    // from the raw value, so `samples: 2` (the Med preset) resolved to an empty
+    // frame: black scene, DOM HUD still on top. WebGL2 does honour 2, so only
+    // clamp on the backend that can't.
+    const msaa = resolveMsaaSamples(quality.msaaSamples, this.backendName);
+
     // Base: system + display sun, shared depth (occlusion).
-    const basePass = pass(this.scene, this.camera, { samples: quality.msaaSamples });
+    const basePass = pass(this.scene, this.camera, { samples: msaa });
 
     // Beauty bloom source: layer 0 only — never the display sun. A two-scale
     // true Gaussian replaces BloomNode's five rectangular mips: the old coarse
@@ -179,20 +190,25 @@ export class Engine {
         ? film(comp, float(quality.filmGrain))
         : comp;
 
-    this.backendName = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend
-      ? 'WebGPU'
-      : 'WebGL2';
-
+    // Dragging a window edge fires `resize` every mouse move, and each setSize
+    // reallocates the swapchain + every PassNode RT (the same hitch the dynamic
+    // DPR controller is careful to make rare). Coalesce to one apply per frame.
+    let resizePending = false;
     window.addEventListener('resize', () => {
-      const w = container.clientWidth || 1280;
-      const h = container.clientHeight || 720;
-      this.camera.aspect = w / h;
-      this.camera.updateProjectionMatrix();
-      this.bloomCamera.aspect = w / h;
-      this.bloomCamera.updateProjectionMatrix();
-      this.solarCamera.aspect = w / h;
-      this.solarCamera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      if (resizePending) return;
+      resizePending = true;
+      requestAnimationFrame(() => {
+        resizePending = false;
+        const w = container.clientWidth || 1280;
+        const h = container.clientHeight || 720;
+        this.camera.aspect = w / h;
+        this.camera.updateProjectionMatrix();
+        this.bloomCamera.aspect = w / h;
+        this.bloomCamera.updateProjectionMatrix();
+        this.solarCamera.aspect = w / h;
+        this.solarCamera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
     });
   }
 
@@ -278,6 +294,10 @@ export class Engine {
    * Does **not** advance compute passes. State restored in `finally`.
    */
   async capture(width = 1280, withPost = true): Promise<string> {
+    // Two in-flight captures cross their setRenderTarget restores (the second
+    // "restores" to the first's RT) and the first's `finally` unfreezes the loop
+    // early. Callers serialize already; make the invariant explicit, not silent.
+    if (this.capturing) throw new Error('capture() already in flight');
     this.capturing = true;
     const prevRT = this.renderer.getRenderTarget();
     let rt: RenderTarget | null = null;

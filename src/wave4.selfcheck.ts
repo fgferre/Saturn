@@ -3,7 +3,7 @@
  * Run via `npm run check`.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Vector3 } from 'three';
@@ -25,6 +25,13 @@ import {
   DISPLAY_SUN_LAYER,
   SOLAR_LAYER,
 } from './scene/Sun.ts';
+import {
+  PRESETS,
+  dprStepsFor,
+  qualityPinFromSearch,
+  quantizeDpr,
+  resolveMsaaSamples,
+} from './core/quality.ts';
 
 const assert = {
   ok(cond: unknown, msg: string): void {
@@ -110,6 +117,42 @@ const base = dirname(fileURLToPath(import.meta.url));
   assert.ok(src.includes('0.78') || src.includes('ringshine'), 'ringshine gain present');
 }
 
+// --- preset ladder: only WebGPU-expressible sample counts -------------------
+{
+  // 2× MSAA does not exist on WebGPU: three promotes the pipeline to 4 but
+  // builds the attachment from the raw value, and the pass renders nothing.
+  for (const p of Object.values(PRESETS)) {
+    assert.ok(
+      p.msaaSamples === 0 || p.msaaSamples === 4,
+      `${p.name}: msaaSamples must be 0 or 4 (got ${p.msaaSamples}) — WebGPU has no 2×`,
+    );
+  }
+
+  assert.near(resolveMsaaSamples(0, 'WebGPU'), 0, 0, 'WebGPU 0× stays disabled');
+  assert.near(resolveMsaaSamples(2, 'WebGPU'), 4, 0, 'WebGPU 2× promotes to legal 4×');
+  assert.near(resolveMsaaSamples(4, 'WebGPU'), 4, 0, 'WebGPU 4× stays 4×');
+  assert.near(resolveMsaaSamples(2, 'WebGL2'), 2, 0, 'WebGL2 keeps legal 2×');
+
+  assert.near(quantizeDpr(0.5, 1), 0.75, 0, 'DPR respects the 0.75 floor');
+  assert.near(quantizeDpr(1.1, 2), 1, 0, 'non-step DPR quantizes at boot');
+  assert.near(quantizeDpr(1.25, 2), 1.25, 0, 'exact DPR step survives');
+  assert.near(quantizeDpr(2, 1.5), 1.5, 0, 'DPR cap is enforced');
+  assert.ok(dprStepsFor(1.5).join(',') === '0.75,1,1.25,1.5', 'Med DPR ladder');
+
+  assert.ok(qualityPinFromSearch('?quality=high') === 'high', 'valid quality pin');
+  assert.ok(qualityPinFromSearch('?quality=__proto__') === null, 'prototype pin rejected');
+  assert.ok(qualityPinFromSearch('?quality=bogus') === null, 'unknown quality pin rejected');
+
+  // F10.1 is only real when the baked assets ship. A silent fallback to the
+  // originals makes Low/Med pay the full download after seven avoidable 404s.
+  const textureRoot = join(base, '..', 'public', 'textures');
+  for (const tier of ['1k', '2k']) {
+    for (const id of ['saturn', 'mimas', 'enceladus', 'tethys', 'dione', 'rhea', 'iapetus']) {
+      assert.ok(existsSync(join(textureRoot, tier, `${id}.jpg`)), `${tier}/${id}.jpg baked`);
+    }
+  }
+}
+
 // --- Engine radial beauty bloom + painted solar path -----------------------
 {
   const eng = readFileSync(join(base, 'core/Engine.ts'), 'utf8');
@@ -132,6 +175,40 @@ const base = dirname(fileURLToPath(import.meta.url));
     !/async capture[\s\S]*setSize\(/.test(eng),
     'capture must not resize the renderer (PassNode black-frame bug)',
   );
+  // Concurrent captures cross their setRenderTarget restores and leak an RT.
+  assert.ok(
+    /async capture[\s\S]{0,400}if \(this\.capturing\) throw/.test(eng),
+    'capture must reject a second in-flight call',
+  );
+  // WebGPU has no 2× MSAA: `samples: 2` (Med) rendered an empty frame.
+  assert.ok(
+    eng.includes('resolveMsaaSamples(quality.msaaSamples, this.backendName)'),
+    'base pass must resolve a backend-legal MSAA sample count',
+  );
+  assert.ok(
+    !/pass\(this\.scene, this\.camera, \{ samples: quality\.msaaSamples \}\)/.test(eng),
+    'base pass must consume the clamped sample count, not the raw preset',
+  );
+
+  // A pinned ?quality must not survive an explicit HUD pick (load() reads the
+  // pin first, so leaving it in place makes the buttons store-and-ignore).
+  const qual = readFileSync(join(base, 'core/quality.ts'), 'utf8');
+  assert.ok(
+    /searchParams\.delete\('quality'\)[\s\S]{0,120}location\.replace/.test(qual),
+    'setQuality must drop the ?quality pin when reloading',
+  );
+  assert.ok(
+    /qualityPinFromSearch\(location\.search\)[\s\S]{0,120}localStorage\.getItem\(TUNED_KEY\)/
+      .test(qual),
+    'ephemeral quality pin must disable the persistent one-shot auto-tuner',
+  );
+
+  // Every resize event applying setSize = swapchain + PassNode RT realloc per
+  // mouse move while dragging a window edge.
+  assert.ok(
+    /'resize',[\s\S]{0,200}requestAnimationFrame\(/.test(eng),
+    'resize handler must coalesce to one apply per frame',
+  );
 }
 
 // --- main: visibility smoothing + moon disks --------------------------------
@@ -140,6 +217,13 @@ const base = dirname(fileURLToPath(import.meta.url));
   assert.ok(main.includes('sunVisibilityFromCamera'), 'glare uses full visibility helper');
   assert.ok(main.includes('sunVisSmoothed') || main.includes('HALF_LIFE'), 'temporal smooth');
   assert.ok(main.includes('solarAtmosphereTint'), 'limb tint applied each frame');
+  assert.ok(main.includes('dprStepsFor(quality.dprCap)'), 'runtime and HUD share DPR ladder');
+  // Photo DPR bump must stay bounded — a phone viewport asks for ~4.8.
+  assert.ok(
+    /PHOTO_MAX_HEIGHT[\s\S]{0,600}Math\.min\(PHOTO_WIDTH \/ cssWidth, PHOTO_MAX_HEIGHT \/ cssHeight\)/
+      .test(main),
+    'photo pixel ratio must be capped by buffer height (mobile VRAM)',
+  );
 }
 
 // saturnShadowOnMoon still used for moon eclipses (not removed)
