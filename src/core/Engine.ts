@@ -24,13 +24,13 @@ import { PostProcessing, WebGPURenderer } from 'three/webgpu';
 import { clamp, float, oneMinus, pass, screenUV, uniform, vec2, vec3 } from 'three/tsl';
 import type { ShaderNodeObject } from 'three/tsl';
 import type { Node } from 'three/webgpu';
-import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { film } from 'three/addons/tsl/display/FilmNode.js';
 import { lensflare } from 'three/addons/tsl/display/LensflareNode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { chromaticAberration } from 'three/addons/tsl/display/ChromaticAberrationNode.js';
 import { sunVisibilityUniform } from '../materials/sharedUniforms.ts';
 import { DISPLAY_SUN_LAYER, SOLAR_LAYER, solarTintUniform } from '../scene/Sun.ts';
+import { radialBloom } from '../effects/radialBloom.ts';
 import { quality } from './quality.ts';
 
 /** Post A/B modes for QA (`?post=`). `anamorphic` kept as alias of full solar glow. */
@@ -110,23 +110,17 @@ export class Engine {
     // Base: system + display sun, shared depth (occlusion).
     const basePass = pass(this.scene, this.camera, { samples: quality.msaaSamples });
 
-    // Beauty bloom source: layer 0 only — never the display sun.
+    // Beauty bloom source: layer 0 only — never the display sun. A two-scale
+    // true Gaussian replaces BloomNode's five rectangular mips: the old coarse
+    // levels remained visible as a square around very bright moons/Earth.
     const bloomSrc = pass(this.scene, this.bloomCamera, { samples: 0 });
-    // radius kept low: three's BloomNode blends a mip pyramid, and a wide
-    // radius weights the coarse (blocky) mips → a square/boxy halo on bright
-    // point sources (moons, the Earth dot, stars). A tight radius weights the
-    // fine mips, so the glow stays round. (The Sun already sidesteps this with
-    // a painted round seed — gotcha §16.)
-    const beautyBloom = bloom(bloomSrc, 0.5, 0.12, 0.85);
+    const beautyBloom = radialBloom(bloomSrc, 0.62, 0.85);
 
     // F7.2 — solar glare: round profile is *painted on the seed sprite*
-    // (core + r⁻² skirt). Composite solarPass directly — no wide BloomNode
-    // (mips → square lavender stacks on a point source). Optional tiny softener
-    // only if needed; default path is seed-only.
+    // (core + r⁻² skirt). Composite solarPass directly: even a "small" mip
+    // softener exposes its coarsest rectangular levels at solar HDR values.
     const solarPass = pass(this.scene, this.solarCamera, { samples: 0 });
-    // Optional 1-px-ish soften (radius tiny); keeps ghosts round if used.
-    const solarSoft = bloom(solarPass, 0.35, 0.12, 0.25);
-    const solarSource = solarPass.add(solarSoft.mul(0.35));
+    const solarSource = solarPass;
 
     // Selective beauty bloom: base (depth-tested sun) + sun-free scene bloom.
     let comp: ShaderNodeObject<Node> = this.postMode === 'raw'
@@ -152,7 +146,9 @@ export class Engine {
     // Solar glare: seed glow always (except raw); optional lensflare ghosts.
     // Anamorphic streak removed (F7 final): discrete beads + internal blue
     // fought the warm round glare (YAGNI — seed + flare carry the look).
-    const wantSolarGlow = this.postMode !== 'raw';
+    // `bloom` intentionally isolates beauty bloom; the other non-raw modes add
+    // the painted solar seed. This makes the documented QA A/B truthful.
+    const wantSolarGlow = this.postMode !== 'raw' && this.postMode !== 'bloom';
     const wantFlare =
       quality.lensflare && (this.postMode === 'flare' || this.postMode === 'full');
     // One fade, one colour: solarGate = atmosphereTint × sunVisibility

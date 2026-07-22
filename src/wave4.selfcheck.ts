@@ -110,16 +110,22 @@ const base = dirname(fileURLToPath(import.meta.url));
   assert.ok(src.includes('0.78') || src.includes('ringshine'), 'ringshine gain present');
 }
 
-// --- Engine solar bloom dual-scale + no ambient path -----------------------
+// --- Engine radial beauty bloom + painted solar path -----------------------
 {
   const eng = readFileSync(join(base, 'core/Engine.ts'), 'utf8');
   assert.ok(eng.includes('bloomCamera.layers.set(0)'), 'beauty bloom never sees sun disk');
-  // Round glare from seed pass (not wide BloomNode stacks).
+  assert.ok(eng.includes('radialBloom(bloomSrc'), 'beauty bloom uses the radial Gaussian path');
+  assert.ok(!eng.includes('BloomNode.js'), 'Engine must not restore rectangular BloomNode mips');
+  // Round glare from the painted seed pass, with no BloomNode softener.
   assert.ok(eng.includes('solarSource') || eng.includes('solarPass'), 'solar source pass present');
   assert.ok(eng.includes('solarGate') || eng.includes('solarTintUniform'), 'tint×vis gate');
   assert.ok(
-    !/bloom\(solarPass,\s*0\.[2-9][0-9],\s*0\.[4-9]/.test(eng),
-    'no wide soft solar BloomNode (square-mip path)',
+    !/bloom\(solarPass/.test(eng) && !eng.includes('solarSoft'),
+    'solar path has no mip softener (square-halo regression)',
+  );
+  assert.ok(
+    /this\.postMode !== 'raw' && this\.postMode !== 'bloom'/.test(eng),
+    '?post=bloom isolates beauty bloom from solar glare',
   );
   // Capture must not call setSize (black-frame regression on WebGPU PassNode).
   assert.ok(
