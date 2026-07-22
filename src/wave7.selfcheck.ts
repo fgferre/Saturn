@@ -9,18 +9,21 @@
  *  - MINOR_MOONS is separate from MOONS and claims NO shadow slot
  *    (MOON_SHADOW_COUNT stays 8).
  *  - Inner-moon periods obey Kepler's third law; Phoebe fits inside the orbit.
+ *  - Every CPU-deformed icosphere is welded before normal recomputation, so
+ *    Hyperion and all eight minor moons use continuous rather than flat normals.
  */
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Vector3 } from 'three';
+import { IcosahedronGeometry, Vector3 } from 'three';
 import { MINOR_MOONS, MOONS, PHOEBE_ECLIPTIC } from './data/saturn.ts';
 import { ECL_TO_SATURN, eclipticOrbitToSaturnFrame } from './data/sunDirection.ts';
 import { elementsToPosition } from './orbital/kepler.ts';
 import { MOON_SHADOW_COUNT } from './materials/sharedUniforms.ts';
 import { ORBIT_MAX_DISTANCE } from './camera/FocusControls.ts';
 import { J2000 } from './orbital/types.ts';
+import { weldProceduralMoonGeometry } from './scene/proceduralMoonGeometry.ts';
 
 const DEG = Math.PI / 180;
 const KM_PER_UNIT = 1000;
@@ -37,6 +40,31 @@ const assert = {
 };
 
 const byId = (id: string) => MINOR_MOONS.find((m) => m.id === id)!;
+
+// --- deformed icospheres: indexed shared vertices + smooth normals -----------
+{
+  const source = new IcosahedronGeometry(1, 4);
+  const beforePositions = source.attributes.position.count;
+  const pos = source.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    pos.setY(i, y * (1 + 0.12 * pos.getX(i)));
+  }
+
+  const welded = weldProceduralMoonGeometry(source);
+  const position = welded.attributes.position;
+  const normal = welded.attributes.normal;
+  assert.ok(welded.index !== null, 'deformed moon geometry is indexed after welding');
+  assert.ok(position.count < beforePositions, 'coincident polyhedron positions are shared');
+  assert.ok(welded.index!.count === beforePositions, 'welding preserves every source triangle');
+  assert.ok(normal.count === position.count, 'every shared position has one smooth normal');
+  assert.ok(welded.getAttribute('uv') === undefined, 'procedural moon geometry carries no UV seam');
+  assert.ok(welded.boundingSphere !== null, 'welded geometry refreshes its bounding sphere');
+  for (let i = 0; i < normal.count; i++) {
+    const length = Math.hypot(normal.getX(i), normal.getY(i), normal.getZ(i));
+    assert.near(length, 1, 1e-5, `normal ${i} is unit length`);
+  }
+}
 
 // --- table shape: 8 minors, separate from the 8 majors, no extra slots -------
 {
@@ -152,11 +180,17 @@ const base = dirname(fileURLToPath(import.meta.url));
     /rotationPeriodH[\s\S]*rotation\.y\s*=/.test(sysSrc),
     'F11.1: SaturnSystem has a non-synchronous rotation branch (rotationPeriodH)',
   );
+  const weldedFamilies = sysSrc.match(/return weldProceduralMoonGeometry\(geo\);/g) ?? [];
+  assert.ok(
+    weldedFamilies.length === 4,
+    'F11.1b: Hyperion + ravioli + irregular + Phoebe geometries all use welded normals',
+  );
   const mainSrc = readFileSync(join(base, 'main.ts'), 'utf8');
   assert.ok(/\.\.\.MINOR_MOONS/.test(mainSrc), 'F11.1: main.ts adds MINOR_MOONS to the body list (HUD/labels/picking)');
 }
 
 console.log('wave7 selfcheck: all assertions passed');
+console.log('  procedural moon geometries: indexed weld + continuous vertex normals');
 const ph = byId('phoebe').elements!;
 console.log(
   `  Phoebe eq: i=${ph.iDeg.toFixed(2)}° node=${ph.nodeDeg.toFixed(2)}° peri=${ph.periDeg.toFixed(2)}°  ` +

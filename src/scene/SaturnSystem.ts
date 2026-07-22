@@ -37,6 +37,7 @@ import { saturnShadowOnMoon, solarAtmosphereTint } from '../physics/eclipse.ts';
 import { Ringshine } from '../physics/ringshine.ts';
 import { quality } from '../core/quality.ts';
 import { fbm3D } from '../utils/noise.ts';
+import { weldProceduralMoonGeometry } from './proceduralMoonGeometry.ts';
 
 export interface SystemBody {
   def: BodyDefinition;
@@ -80,7 +81,7 @@ function ringGeometry(profile: RingProfile): RingGeometry {
   return geo;
 }
 
-function hyperionGeometry(): IcosahedronGeometry {
+function hyperionGeometry(): BufferGeometry {
   const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
@@ -93,8 +94,7 @@ function hyperionGeometry(): IcosahedronGeometry {
     if (d > 0.55) r -= (d - 0.55) * 0.55;
     pos.setXYZ(i, v.x * r, v.y * r * 0.78, v.z * r * 1.15); // irregular axes
   }
-  geo.computeVertexNormals();
-  return geo;
+  return weldProceduralMoonGeometry(geo);
 }
 
 /**
@@ -105,7 +105,7 @@ function hyperionGeometry(): IcosahedronGeometry {
  * rings. Aspect ratio ~2:1 (equatorial vs polar). ⚠ VERIFICAR: Pan ~34×31×21 km,
  * Atlas ~41×35×19 km (Thomas et al. 2018, Cassini).
  */
-function ravioliGeometry(): IcosahedronGeometry {
+function ravioliGeometry(): BufferGeometry {
   const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
@@ -123,8 +123,7 @@ function ravioliGeometry(): IcosahedronGeometry {
     // wide-brimmed "ravioli" (equatorial ~1.44 vs polar ~0.6 ⇒ ~2:1).
     pos.setXYZ(i, v.x * r, v.y * 0.6 * lump, v.z * r);
   }
-  geo.computeVertexNormals();
-  return geo;
+  return weldProceduralMoonGeometry(geo);
 }
 
 /**
@@ -133,7 +132,7 @@ function ravioliGeometry(): IcosahedronGeometry {
  * without the giant impact cup. `seed` decorrelates the four so they don't read
  * as clones. Elongated along local X (Prometheus is ~2:1: 136×79×59 km).
  */
-function irregularMoonGeometry(seed: number): IcosahedronGeometry {
+function irregularMoonGeometry(seed: number): BufferGeometry {
   const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
@@ -142,8 +141,7 @@ function irregularMoonGeometry(seed: number): IcosahedronGeometry {
     const r = 1 + (fbm3D(v.x * 1.7 + seed, v.y * 1.7 + seed, v.z * 1.7, 4, 6) - 0.5) * 0.5;
     pos.setXYZ(i, v.x * r * 1.32, v.y * r * 0.74, v.z * r * 0.92); // tri-axial, elongated X
   }
-  geo.computeVertexNormals();
-  return geo;
+  return weldProceduralMoonGeometry(geo);
 }
 
 /**
@@ -151,7 +149,7 @@ function irregularMoonGeometry(seed: number): IcosahedronGeometry {
  * emphatically NOT lobed (unlike the small inner shepherds). Round body, barely
  * oblate, gentle cratered texture; the dark albedo comes from its material.
  */
-function phoebeGeometry(): IcosahedronGeometry {
+function phoebeGeometry(): BufferGeometry {
   const geo = new IcosahedronGeometry(1, 14);
   const pos = geo.attributes.position;
   const v = new Vector3();
@@ -160,8 +158,7 @@ function phoebeGeometry(): IcosahedronGeometry {
     const r = 1 + (fbm3D(v.x * 3.1 + 2, v.y * 3.1, v.z * 3.1, 4, 6) - 0.5) * 0.13;
     pos.setXYZ(i, v.x * r, v.y * r * 0.96, v.z * r); // barely oblate, no lobes
   }
-  geo.computeVertexNormals();
-  return geo;
+  return weldProceduralMoonGeometry(geo);
 }
 
 function orbitLine(def: BodyDefinition): Line {
