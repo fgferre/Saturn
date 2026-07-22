@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit -p tsconfig.selfcheck.json && node --experimental-strip-types src/orbital/kepler.selfcheck.ts && node --experimental-strip-types src/wave1.selfcheck.ts && node --experimental-strip-types src/wave2.selfcheck.ts && node --experimental-strip-types src/wave3.selfcheck.ts && node --experimental-strip-types src/wave4.selfcheck.ts && node --experimental-strip-types src/wave5.selfcheck.ts && node --experimental-strip-types src/wave6.selfcheck.ts && node --experimental-strip-types src/wave7.selfcheck.ts && node --experimental-strip-types src/wave8.selfcheck.ts && node --experimental-strip-types src/wave9.selfcheck.ts",
+    "qa:moons": "node scripts/qa-irregular-moons.mjs",
     "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
