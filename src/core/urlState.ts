@@ -46,6 +46,14 @@ const JD_HALF_SPAN = 200 * 365.25;
 const JD_MIN = J2000 - JD_HALF_SPAN;
 const JD_MAX = J2000 + JD_HALF_SPAN;
 
+/**
+ * Simulated seconds per real second. The fastest HUD preset is 5 d/s (4.32e5);
+ * anything past this is junk, and a crafted `?speed=1e308` walks SimClock's JD
+ * to Infinity on the first frame — an unrecoverable state (every date, orbit
+ * and label goes NaN until the user reloads).
+ */
+const SPEED_MAX = 1e7;
+
 /** Body ids are short slugs; reject anything that isn't one (e.g. markup). */
 const FOCUS_RE = /^[a-z][a-z0-9_-]{0,31}$/i;
 
@@ -98,7 +106,7 @@ export function parseState(search: string): UrlState {
   if (jd !== undefined && jd >= JD_MIN && jd <= JD_MAX) out.jd = jd;
 
   const speed = finiteNum(params.get('speed'));
-  if (speed !== undefined) out.speed = speed;
+  if (speed !== undefined && Math.abs(speed) <= SPEED_MAX) out.speed = speed;
 
   const cam = params.get('cam');
   if (cam !== null) {
@@ -139,7 +147,10 @@ export function serializeState(state: UrlState): string {
   ) {
     params.set('jd', String(round(state.jd, 6)));
   }
-  if (state.speed !== undefined && Number.isFinite(state.speed)) {
+  if (
+    state.speed !== undefined && Number.isFinite(state.speed) &&
+    Math.abs(state.speed) <= SPEED_MAX
+  ) {
     params.set('speed', String(round(state.speed, 6)));
   }
   if (

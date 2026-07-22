@@ -54,6 +54,21 @@ const assert = {
     'unrelated params ignored without ?');
 }
 
+// --- speed bounds ----------------------------------------------------------
+{
+  // A finite-but-absurd speed drives SimClock's JD to Infinity on frame 1 and
+  // never comes back; bound it at the parse boundary like jd/fov/dist.
+  assert.ok(parseState('?speed=1e308').speed === undefined, 'absurd speed rejected');
+  assert.ok(parseState('?speed=-1e308').speed === undefined, 'absurd negative speed rejected');
+  assert.near(parseState('?speed=432000').speed!, 432000, 1e-9, 'fastest preset survives');
+  assert.near(parseState('?speed=-86400').speed!, -86400, 1e-9, 'backwards preset survives');
+  // Serialization applies the same bound, so the round-trip contract holds.
+  assert.ok(
+    parseState(serializeState({ speed: 1e308 })).speed === undefined,
+    'absurd speed never serialized',
+  );
+}
+
 // --- cam validation --------------------------------------------------------
 {
   assert.ok(parseState('?cam=1,2').cam === undefined, 'cam needs 3 components');
