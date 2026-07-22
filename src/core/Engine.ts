@@ -287,9 +287,15 @@ export class Engine {
       // Drawing-buffer pixels (what PassNode / the GPU actually render into).
       const fullW = Math.max(1, Math.round(cssSize.x * dpr));
       const fullH = Math.max(1, Math.round(cssSize.y * dpr));
+      // WebGPU CopyTextureToBuffer requires bytesPerRow to be 256-byte aligned.
+      // RGBA8 is 4 B/px, hence a 64-pixel row quantum. Dynamic DPR can produce
+      // arbitrary widths; pad the RT/readback row and render only into the real
+      // viewport. Without this, Chromium rejects the copy and returns all zeros.
+      const readW = Math.ceil(fullW / 64) * 64;
 
       this.syncAuxCameras();
-      rt = new RenderTarget(fullW, fullH);
+      rt = new RenderTarget(readW, fullH);
+      rt.viewport.set(0, 0, fullW, fullH);
       this.renderer.setRenderTarget(rt);
 
       if (withPost) {
@@ -299,7 +305,7 @@ export class Engine {
       }
 
       const buf = (await this.renderer.readRenderTargetPixelsAsync(
-        rt, 0, 0, fullW, fullH,
+        rt, 0, 0, readW, fullH,
       )) as Uint8Array;
 
       // Pack full-res pixels into an ImageData canvas (handle WebGL Y-flip).
@@ -320,7 +326,7 @@ export class Engine {
       for (let y = 0; y < fullH; y++) {
         const srcY = flip ? fullH - 1 - y : y;
         for (let x = 0; x < fullW; x++) {
-          const s = (srcY * fullW + x) * 4;
+          const s = (srcY * readW + x) * 4;
           const d = (y * fullW + x) * 4;
           img.data[d] = encode(buf[s]);
           img.data[d + 1] = encode(buf[s + 1]);

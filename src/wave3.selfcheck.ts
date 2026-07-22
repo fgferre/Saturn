@@ -181,6 +181,10 @@ function residualSky(camera: Vector3, sky: Vector3): number {
   );
   // Capture must use RT readback (WebGL2-safe), not default-FB + double-rAF.
   assert.ok(engSrc.includes('readRenderTargetPixelsAsync'), 'capture uses RT readback');
+  assert.ok(engSrc.includes('Math.ceil(fullW / 64) * 64'),
+    'capture row width satisfies WebGPU 256-byte alignment under dynamic DPR');
+  assert.ok(engSrc.includes('srcY * readW'),
+    'capture PNG unpack respects the padded readback row stride');
   assert.ok(!engSrc.includes('waitForPresent'), 'capture must not double-rAF the default FB');
   assert.ok(engSrc.includes('image/png'), 'capture encodes PNG for QA');
   assert.ok(
