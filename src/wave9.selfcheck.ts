@@ -138,6 +138,14 @@ const base = dirname(fileURLToPath(import.meta.url));
     { left: 44, top: 12, right: 72, bottom: 30 },
   ), 'label collision keeps boxes beyond the padding budget');
 
+  // `pos` is projected in place, so the apparent-size score must sample the
+  // world distance BEFORE that call or every body scores ~the same denominator.
+  const labelsSrc = readFileSync(join(base, 'ui', 'labels.ts'), 'utf8');
+  assert.ok(
+    labelsSrc.indexOf('const worldDistance') < labelsSrc.indexOf('pos.project(camera)'),
+    'label score must read world distance before projecting to NDC',
+  );
+
   const hudCss = readFileSync(join(base, 'ui', 'hud.css'), 'utf8');
   const hudTs = readFileSync(join(base, 'ui', 'hud.ts'), 'utf8');
   assert.ok(hudCss.includes('@media (max-width: 720px), (max-height: 500px)'),

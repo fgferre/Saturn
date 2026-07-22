@@ -121,12 +121,16 @@ export class BodyLabels {
         continue;
       }
 
+      // MUST be read before project() — that call rewrites `pos` in place to
+      // NDC, and measuring to an NDC point gives every body ~the same distance,
+      // collapsing the apparent-size score below into "biggest radius wins".
+      const worldDistance = camera.position.distanceTo(pos);
+
       pos.project(camera);
       if (pos.z > 1 || Math.abs(pos.x) > 1.1 || Math.abs(pos.y) > 1.1) {
         el.classList.add('hidden');
         continue;
       }
-      const worldDistance = camera.position.distanceTo(pos);
       const { x, y } = projectNdcToViewport(pos.x, pos.y, rect);
       // Approximate the stable uppercase label box without forcing a DOM layout
       // read after every position write. The largest apparent body wins when
