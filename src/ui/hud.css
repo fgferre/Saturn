@@ -29,6 +29,7 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   transition: opacity 0.8s;
+  z-index: 2;
 }
 .body-label { transition: opacity 0.8s; }
 
@@ -154,12 +155,12 @@
 .hud-time button.active { color: var(--accent); border-color: rgba(232,192,122,0.5); }
 .hud-time .sep { width: 1px; height: 18px; background: var(--hud-border); margin: 0 4px; }
 
-/* Info panel — top right */
+/* Info panel — first item in the coordinated desktop right column. */
 .hud-info {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 264px;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  flex: 0 0 auto;
   padding: 14px 16px;
 }
 .hud-info h2 {
@@ -256,40 +257,59 @@
 .hud-photo:hover, .hud-share:hover { color: var(--hud-text); border-color: rgba(255,255,255,0.25); }
 .hud-photo:disabled { opacity: 0.5; cursor: default; }
 
-/* Bottom-right column: Postcards gallery stacked above the Events panel. */
+/* Coordinated right column: Info + Postcards + Events share one bounded flow.
+   Its own scroll is the last-resort fallback on unusually short viewports. */
 .hud-right {
   position: absolute;
+  top: 16px;
   right: 16px;
-  bottom: 18px;
+  bottom: 88px;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 300px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 10px;
-  max-height: calc(100vh - 210px);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.28) transparent;
+  padding-right: 2px;
 }
+#hud.hud-hidden .hud-right,
+body.cinema .hud-right { pointer-events: none; }
 
 /* Events panel — scrollable one-off list + live apoapsis row. */
 .hud-events {
-  width: 232px;
-  min-height: 0; /* allow the scroll area to shrink inside the flex column */
-  max-height: 44vh;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 128px;
+  flex: 1 1 220px;
   display: flex;
   flex-direction: column;
   padding: 10px 8px 8px;
 }
+.hud-events.collapsed { min-height: 0; flex: 0 0 auto; }
 
 /* Postcards gallery (F12.1c) — curated one-click views, above the events. */
 .hud-postcards {
-  width: 232px;
+  box-sizing: border-box;
+  width: 100%;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   padding: 10px 8px 8px;
 }
+.hud-postcards.collapsed { flex: 0 0 auto; }
 .hud-postcards-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
+.hud-postcards-list[hidden],
+.hud-events-list[hidden] { display: none !important; }
 .hud-postcard {
   all: unset;
   cursor: pointer;
@@ -318,14 +338,37 @@
   text-overflow: ellipsis;
 }
 .hud-postcard:hover .pc-name { color: var(--accent); }
-.hud-events-title {
+.hud-panel-toggle {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
   padding: 0 6px 6px;
+  border-radius: 5px;
+}
+.hud-panel-toggle:hover .hud-events-title { color: var(--accent); opacity: 1; }
+.hud-panel-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.hud-events-title {
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--hud-dim);
   opacity: 0.7;
+}
+.hud-panel-chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid var(--hud-dim);
+  border-bottom: 1px solid var(--hud-dim);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.15s;
+}
+.hud-panel-toggle[aria-expanded="false"] .hud-panel-chevron {
+  transform: rotate(-45deg) translate(-1px, -1px);
 }
 .hud-events-list {
   display: flex;
@@ -489,6 +532,7 @@ body.cinema .cinema-exit { opacity: 1; }
   padding: 2px 6px;
   transition: color 0.15s;
   will-change: transform;
+  z-index: 1;
 }
 .body-label:hover { color: var(--accent); }
 .body-label:focus-visible {
@@ -501,7 +545,11 @@ body.cinema .cinema-exit { opacity: 1; }
 @media (max-width: 720px) {
   /* Events + Postcards stay hidden on the narrow layout; the body list keeps
      clear of the bottom sheet. */
-  .hud-right { display: none; }
+  .hud-right {
+    display: contents;
+  }
+  .hud-right > .hud-postcards,
+  .hud-right > .hud-events { display: none !important; }
   .hud-bodies { max-height: 40vh; }
 
   /* F12.2 — the info panel becomes a bottom sheet instead of vanishing. It docks
@@ -509,6 +557,7 @@ body.cinema .cinema-exit { opacity: 1; }
      indicator / rounded corners via viewport-fit=cover). Collapsed by default:
      only the grip + body name show; tap the grip to reveal the full readout. */
   .hud-info {
+    position: absolute;
     top: auto;
     left: 0;
     right: 0;

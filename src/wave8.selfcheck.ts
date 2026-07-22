@@ -162,6 +162,15 @@ const base = dirname(fileURLToPath(import.meta.url));
   const hudSrc = readFileSync(join(base, 'ui/hud.ts'), 'utf8');
   assert.ok(/setEvents\s*\(/.test(hudSrc), 'hud.ts exposes setEvents');
   assert.ok(/setNextApoapsis\s*\(/.test(hudSrc), 'hud.ts exposes setNextApoapsis');
+  assert.ok(/rightStack\.appendChild\(info\)/.test(hudSrc),
+    'Info shares the coordinated right column with Postcards and Events');
+  assert.ok(hudSrc.includes('RIGHT_PANELS_KEY') && hudSrc.includes('wirePanelToggle'),
+    'auxiliary panels have persistent collapse/reopen controls');
+  const hudCss = readFileSync(join(base, 'ui/hud.css'), 'utf8');
+  assert.ok(/\.hud-right\s*\{[\s\S]*?top:\s*16px;[\s\S]*?bottom:\s*88px;/.test(hudCss),
+    'desktop right column is vertically bounded instead of independently anchored');
+  assert.ok(/\.hud-right\s*>\s*\.hud-postcards[\s\S]*?display:\s*none\s*!important/.test(hudCss),
+    'mobile keeps auxiliary panels hidden while Info remains a bottom sheet');
 }
 
 console.log('wave8 selfcheck: all assertions passed');

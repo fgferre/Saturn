@@ -126,6 +126,9 @@ const POINTER_SHORTCUTS: { keys: string; label: string }[] = [
 
 /** localStorage flag: the first-visit hint shows once, then never again. */
 const HINT_KEY = 'saturn.hinted';
+/** Persisted open/closed state for the two auxiliary desktop panels. */
+const RIGHT_PANELS_KEY = 'saturn.hud.rightPanels.v1';
+type RightPanelId = 'postcards' | 'events';
 
 export class Hud {
   private readonly dateEl: HTMLElement;
@@ -297,6 +300,13 @@ export class Hud {
     nowBtn.addEventListener('click', () => cb.onNow());
     bar.appendChild(nowBtn);
 
+    // One coordinated desktop column owns every panel on the right. On mobile
+    // CSS turns this wrapper into display:contents so Info remains a bottom
+    // sheet while the two auxiliary panels stay hidden.
+    const rightStack = document.createElement('div');
+    rightStack.className = 'hud-right';
+    hud.appendChild(rightStack);
+
     // Info panel.
     const info = document.createElement('div');
     info.className = 'panel hud-info';
@@ -324,7 +334,7 @@ export class Hud {
         <button type="button" class="hud-record" title="Record a 10-second WebM video of the current view" aria-label="Record a 10 second video">⏺ Record 10s</button>
         <button type="button" class="hud-share" title="Copy a shareable link to this exact view" aria-label="Copy a shareable link">🔗 Share</button>
       </div>`;
-    hud.appendChild(info);
+    rightStack.appendChild(info);
 
     // F12.2 — on narrow touch layouts the info panel is a bottom sheet (it used
     // to vanish under 720px). This grip is display:none on desktop; on mobile it
@@ -426,19 +436,13 @@ export class Hud {
       }
     });
 
-    // Bottom-right column: the Postcards gallery (F12.1c, filled via
-    // setPostcards) stacked above the Events panel. A flex column so both stay
-    // anchored to the corner and neither overlaps the other.
-    const rightStack = document.createElement('div');
-    rightStack.className = 'hud-right';
-    hud.appendChild(rightStack);
-
     // Postcards gallery — created empty here, populated by setPostcards. Sits at
     // the top of the stack so the (taller, scrollable) Events panel is below it.
     const postcards = document.createElement('div');
     postcards.className = 'panel hud-postcards';
-    postcards.innerHTML =
-      '<div class="hud-events-title">Postcards</div><div class="hud-postcards-list"></div>';
+    postcards.innerHTML = `<button type="button" class="hud-panel-toggle" aria-expanded="true">
+      <span class="hud-events-title">Postcards</span><span class="hud-panel-chevron" aria-hidden="true"></span>
+      </button><div class="hud-postcards-list"></div>`;
     rightStack.appendChild(postcards);
     this.postcardsListEl = postcards.querySelector('.hud-postcards-list')!;
     // Hidden until setPostcards adds at least one card.
@@ -448,9 +452,45 @@ export class Hud {
     // live "next apoapsis" row that tracks the simulated clock.
     const events = document.createElement('div');
     events.className = 'panel hud-events';
-    events.innerHTML = '<div class="hud-events-title">Events</div><div class="hud-events-list"></div>';
+    events.innerHTML = `<button type="button" class="hud-panel-toggle" aria-expanded="true">
+      <span class="hud-events-title">Events</span><span class="hud-panel-chevron" aria-hidden="true"></span>
+      </button><div class="hud-events-list"></div>`;
     rightStack.appendChild(events);
     this.eventsListEl = events.querySelector('.hud-events-list')!;
+
+    // The title bar remains as a dock when collapsed, so the panel always has a
+    // visible reopening affordance. Storage failures are deliberately harmless.
+    let rightPanelState: Partial<Record<RightPanelId, boolean>> = {};
+    try {
+      const raw = localStorage.getItem(RIGHT_PANELS_KEY);
+      const parsed: unknown = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === 'object') {
+        rightPanelState = parsed as Partial<Record<RightPanelId, boolean>>;
+      }
+    } catch { /* blocked storage or malformed legacy value */ }
+    const wirePanelToggle = (
+      panel: HTMLElement,
+      body: HTMLElement,
+      id: RightPanelId,
+      title: string,
+    ): void => {
+      const button = panel.querySelector<HTMLButtonElement>('.hud-panel-toggle')!;
+      const setOpen = (open: boolean, persist: boolean): void => {
+        body.hidden = !open;
+        panel.classList.toggle('collapsed', !open);
+        button.setAttribute('aria-expanded', String(open));
+        button.setAttribute('aria-label', `${open ? 'Collapse' : 'Open'} ${title} panel`);
+        if (!persist) return;
+        rightPanelState[id] = open;
+        try { localStorage.setItem(RIGHT_PANELS_KEY, JSON.stringify(rightPanelState)); } catch { /* private mode */ }
+      };
+      setOpen(rightPanelState[id] !== false, false);
+      button.addEventListener('click', () => {
+        setOpen(button.getAttribute('aria-expanded') !== 'true', true);
+      });
+    };
+    wirePanelToggle(postcards, this.postcardsListEl, 'postcards', 'Postcards');
+    wirePanelToggle(events, this.eventsListEl, 'events', 'Events');
 
     // Help overlay ('?' toggles, Esc closes — bindings live in main.ts). Built
     // from the shared shortcut lists so it can never disagree with the keys.
